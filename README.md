@@ -19,7 +19,7 @@
 - [9. WebSocket Mock](#9-websocket-mock)
 - [10. 最佳实践](#10-最佳实践)
 - [11. 管理端点参考](#11-管理端点参考)
-- [12. Docker 部署](#12-docker-部署)
+- [12. 服务器部署与热更新](#12-服务器部署与热更新)
 - [13. 扩展开发](#13-扩展开发)
 - [14. 常见问题](#14-常见问题)
 - [15. 测试覆盖](#15-测试覆盖)
@@ -673,45 +673,212 @@ curl -X POST http://localhost:8080/mock/_admin/replay/start
 
 ---
 
-## 12. Docker 部署
+## 12. 服务器部署与热更新
 
-### 12.1 构建镜像
+### 12.1 核心思路
+
+JAR 包里打包了一份默认的 `mock-endpoints.yml`（classpath 内）。**热更新的关键是把配置文件放在 JAR 外部，并用 `mock.watch-path` 指向它**。之后只需修改那个外部 YAML 文件，服务 500ms 内自动感知并重载——不需要重启服务，不需要调任何接口。
+
+```
+服务器目录
+/opt/mock-service/
+├── mock-boot-1.0.0.jar          ← 只在升级版本时替换
+└── config/
+    └── mock-endpoints.yml       ← 日常只改这个文件
+```
+
+---
+
+### 12.2 第一步：本机打包
+
+```bash
+cd mock-service
+mvn clean package -DskipTests
+# 产物：mock-boot/target/mock-boot-1.0.0.jar
+```
+
+---
+
+### 12.3 第二步：上传到服务器
+
+```bash
+# 在服务器上建好目录
+ssh user@your-server "mkdir -p /opt/mock-service/config"
+
+# 上传 JAR（只在第一次或版本升级时需要）
+scp mock-boot/target/mock-boot-1.0.0.jar \
+    user@your-server:/opt/mock-service/
+
+# 上传初始配置
+scp mock-business/src/main/resources/mock-endpoints.yml \
+    user@your-server:/opt/mock-service/config/
+```
+
+---
+
+### 12.4 第三步：启动服务
+
+```bash
+# SSH 登录服务器
+ssh user@your-server
+
+# 启动（关键：--mock.watch-path 指向外部配置文件）
+java -Xms128m -Xmx256m \
+  -jar /opt/mock-service/mock-boot-1.0.0.jar \
+  --mock.watch-path=file:/opt/mock-service/config/mock-endpoints.yml \
+  --server.port=8080
+```
+
+看到以下日志说明启动并监听成功：
+```
+文件监听已启动: /opt/mock-service/config/mock-endpoints.yml
+Registered 10 mock endpoints:
+Netty started on port 8080
+```
+
+---
+
+### 12.5 第四步：热更新配置（三种方式）
+
+**方式一：直接在服务器上编辑**
+
+```bash
+vim /opt/mock-service/config/mock-endpoints.yml
+# 保存后无需任何操作，500ms 内日志自动出现：
+# 检测到配置文件变更，开始热加载...
+# 热加载完成: 10 个 endpoint, 1 个 websocket
+```
+
+**方式二：从本机推送（日常推荐）**
+
+```bash
+# 本机改完 YAML 后，直接 scp 覆盖过去
+scp mock-business/src/main/resources/mock-endpoints.yml \
+    user@your-server:/opt/mock-service/config/mock-endpoints.yml
+# 无需其他操作，服务器自动感知并重载
+```
+
+**方式三：服务器从 Git 拉取（适合 CI/CD）**
+
+```bash
+# 服务器上（或通过 webhook/cron 触发）
+cd /opt/mock-service/config
+git pull
+# 文件内容变化后自动触发热加载
+```
+
+> **注意**：如果改了 YAML 语法有误，热加载会失败，**服务继续用旧配置正常运行**，日志打印具体错误原因，不影响线上服务。
+
+---
+
+### 12.6 配成 systemd 服务（后台常驻）
+
+避免 SSH 断开后进程退出，生产环境必备：
+
+```bash
+# 在服务器上创建 systemd 服务文件
+sudo tee /etc/systemd/system/mock-service.service > /dev/null << 'EOF'
+[Unit]
+Description=Mock Service
+After=network.target
+
+[Service]
+User=nobody
+WorkingDirectory=/opt/mock-service
+ExecStart=/usr/bin/java -Xms128m -Xmx256m \
+  -jar /opt/mock-service/mock-boot-1.0.0.jar \
+  --mock.watch-path=file:/opt/mock-service/config/mock-endpoints.yml \
+  --server.port=8080
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 启用并启动
+sudo systemctl daemon-reload
+sudo systemctl enable mock-service   # 开机自启
+sudo systemctl start mock-service
+
+# 常用管理命令
+sudo systemctl status mock-service   # 查看状态
+sudo systemctl restart mock-service  # 重启（升级 JAR 后执行）
+journalctl -u mock-service -f        # 实时查看日志
+```
+
+---
+
+### 12.7 版本升级流程
+
+只升级 JAR，配置文件不动：
+
+```bash
+# 本机重新打包
+mvn clean package -DskipTests
+
+# 上传新 JAR
+scp mock-boot/target/mock-boot-1.0.0.jar user@your-server:/opt/mock-service/
+
+# 重启服务（配置文件保持不变，自动使用外部 YAML）
+ssh user@your-server "sudo systemctl restart mock-service"
+```
+
+---
+
+### 12.8 Docker 部署
+
+#### 构建镜像
 
 ```bash
 mvn clean package -DskipTests
 docker build -t mock-service:1.0.0 .
 ```
 
-### 12.2 基础运行
+#### 基础运行
 
 ```bash
 docker run -d -p 8080:8080 --name mock-service mock-service:1.0.0
 ```
 
-### 12.3 带热加载的运行（推荐）
+#### 带热加载的运行（推荐）
 
 ```bash
-# 将 mock-endpoints.yml 挂载为外部配置，修改文件后自动热加载
+# 将宿主机的 mock-endpoints.yml 挂载进容器，修改宿主机文件即自动热加载
 docker run -d -p 8080:8080 \
   -e JAVA_OPTS="-Dmock.watch-path=file:/config/mock-endpoints.yml" \
   -v $(pwd)/mock-endpoints.yml:/config/mock-endpoints.yml \
   --name mock-service mock-service:1.0.0
 ```
 
-### 12.4 Docker Compose
+#### Docker Compose
 
 ```bash
 docker-compose up -d
 docker-compose logs -f mock-service
 ```
 
-### 12.5 常用启动参数
+---
+
+### 12.9 各部署方式对比
+
+| 方式 | 热更新 | 适合场景 |
+|------|--------|----------|
+| JAR + systemd + 外部文件 | ✅ 改文件自动生效 | **推荐，Linux 服务器** |
+| JAR 直接运行 + 外部文件 | ✅ 改文件自动生效 | 临时测试 / 开发调试 |
+| Docker + volume 挂载 | ✅ 改宿主机文件自动生效 | 容器化环境 |
+| JAR 内置配置（无 watch-path） | ❌ 需重新打包重启 | 不推荐 |
+
+---
+
+### 12.10 常用启动参数速查
 
 ```bash
 java -jar mock-boot-1.0.0.jar \
-  --server.port=9090 \                          # 修改端口
-  --mock.watch-path=file:/data/config.yml \     # 启用文件热加载
-  --mock.admin.api-key=my-secret-key            # 保护管理端点
+  --server.port=9090 \                                              # 修改端口（默认 8080）
+  --mock.watch-path=file:/opt/config/mock-endpoints.yml \          # 启用外部文件热加载
+  --mock.admin.api-key=your-secret-key \                           # 保护管理端点（可选）
+  --logging.file.path=/var/log/mock-service                        # 日志输出目录
 ```
 
 ---
