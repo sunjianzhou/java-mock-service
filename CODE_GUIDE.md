@@ -833,7 +833,13 @@ java -Xms128m -Xmx256m -jar mock-boot/target/mock-boot-1.0.0.jar "$@"
 
 **职责**：录制数据的**持久化文件**，由 `POST /mock/_admin/recordings/save` 写入，`load` 读取。
 
-格式：`RecordedExchange` 对象的 JSON 数组，可直接用文本编辑器查看和编辑。可以提交到 Git 供团队共享录制场景。
+**它是怎么来的**：`InMemoryRecordingStore` 的默认存储目录是相对路径 `"recordings"`（相对于服务启动时的工作目录）。在 `mock-core/` 目录下跑测试时，若触发了保存录制操作，文件就落在这里。内容是测试端点（`/mock/test/validation` 等）的录制数据，属于**运行时生成文件**，不是手动创建的。
+
+**版本库状态**：`.gitignore` 中已配置 `recordings/` 规则将其排除，**不会被 git 跟踪**，可安全忽略。
+
+**真实部署时的位置**：服务从哪个目录启动，`recordings/` 就在那个目录下（通常是 JAR 所在目录）。目录不存在时 `saveToFile()` 会自动创建。
+
+格式：`RecordedExchange` 对象的 JSON 数组，字段说明见第二节 record 层。如有需要，可将此文件提交到 Git 供团队共享录制场景（手动 `git add -f` 强制加入）。
 
 ---
 
