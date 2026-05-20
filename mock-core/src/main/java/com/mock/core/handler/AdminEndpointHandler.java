@@ -20,6 +20,8 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -36,7 +38,11 @@ public class AdminEndpointHandler {
     private static final Logger log = LoggerFactory.getLogger(AdminEndpointHandler.class);
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER =
         new com.fasterxml.jackson.databind.ObjectMapper();
-    private static final org.yaml.snakeyaml.Yaml YAML = new org.yaml.snakeyaml.Yaml();
+    // Fix-2: SafeConstructor 禁止 !! 标签实例化任意 Java 类，防止 YAML 注入
+    private static final org.yaml.snakeyaml.Yaml YAML =
+        new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor());
+    // Fix-4: 无状态工厂，提取为静态常量避免每次响应重复创建
+    private static final DefaultDataBufferFactory DATA_BUFFER_FACTORY = new DefaultDataBufferFactory();
 
     private final RecordingStore recordingStore;
     private final MockMetrics metrics;
@@ -55,26 +61,30 @@ public class AdminEndpointHandler {
 
     public Mono<ServerResponse> startRecording() {
         recordingStore.startRecording();
+        // Fix-3: startRecording() 会自动停止回放，同步重置两个指标避免状态不一致
+        metrics.setReplayActive(false);
         metrics.setRecordingActive(true);
-        return jsonOk("{\"status\":\"ok\",\"recording\":true}");
+        return jsonOk(obj().put("status", "ok").put("recording", true));
     }
 
     public Mono<ServerResponse> stopRecording() {
         recordingStore.stopRecording();
         metrics.setRecordingActive(false);
-        return jsonOk("{\"status\":\"ok\",\"recording\":false,\"count\":" + recordingStore.size() + "}");
+        return jsonOk(obj().put("status", "ok").put("recording", false).put("count", recordingStore.size()));
     }
 
     public Mono<ServerResponse> startReplay() {
         recordingStore.startReplay();
+        // Fix-3: startReplay() 会自动停止录制，同步重置两个指标
+        metrics.setRecordingActive(false);
         metrics.setReplayActive(true);
-        return jsonOk("{\"status\":\"ok\",\"replaying\":true,\"count\":" + recordingStore.size() + "}");
+        return jsonOk(obj().put("status", "ok").put("replaying", true).put("count", recordingStore.size()));
     }
 
     public Mono<ServerResponse> stopReplay() {
         recordingStore.stopReplay();
         metrics.setReplayActive(false);
-        return jsonOk("{\"status\":\"ok\",\"replaying\":false}");
+        return jsonOk(obj().put("status", "ok").put("replaying", false));
     }
 
     public Mono<ServerResponse> listRecordings() {
@@ -82,7 +92,7 @@ public class AdminEndpointHandler {
             byte[] jsonBytes = OBJECT_MAPPER.writeValueAsBytes(recordingStore.list());
             return ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Mono.just(new DefaultDataBufferFactory().wrap(jsonBytes)), DataBuffer.class);
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(jsonBytes)), DataBuffer.class);
         } catch (Exception e) {
             log.error("Failed to serialize recordings", e);
             return ServerResponse.status(500).build();
@@ -91,7 +101,7 @@ public class AdminEndpointHandler {
 
     public Mono<ServerResponse> clearRecordings() {
         recordingStore.clear();
-        return jsonOk("{\"status\":\"ok\",\"message\":\"recordings cleared\"}");
+        return jsonOk(obj().put("status", "ok").put("message", "recordings cleared"));
     }
 
     public Mono<ServerResponse> saveRecordings() {
@@ -100,28 +110,20 @@ public class AdminEndpointHandler {
             return recordingStore.size();
         })
         .subscribeOn(Schedulers.boundedElastic())
-        .flatMap(count -> jsonOk("{\"status\":\"ok\",\"message\":\"saved " + count + " recordings\"}"))
+        .flatMap(count -> jsonOk(obj().put("status", "ok").put("message", "saved " + count + " recordings")))
         .onErrorResume(e -> {
             log.error("Failed to save recordings", e);
-            return ServerResponse.status(500)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Mono.just(new DefaultDataBufferFactory().wrap(
-                    "{\"status\":\"error\",\"message\":\"Failed to save recordings\"}"
-                    .getBytes(StandardCharsets.UTF_8))), DataBuffer.class);
+            return jsonError("Failed to save recordings");
         });
     }
 
     public Mono<ServerResponse> loadRecordings() {
         return Mono.fromCallable(() -> recordingStore.loadFromFile())
             .subscribeOn(Schedulers.boundedElastic())
-            .flatMap(count -> jsonOk("{\"status\":\"ok\",\"loaded\":" + count + "}"))
+            .flatMap(count -> jsonOk(obj().put("status", "ok").put("loaded", count)))
             .onErrorResume(e -> {
                 log.error("Failed to load recordings", e);
-                return ServerResponse.status(500)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(new DefaultDataBufferFactory().wrap(
-                        "{\"status\":\"error\",\"message\":\"Failed to load recordings\"}"
-                        .getBytes(StandardCharsets.UTF_8))), DataBuffer.class);
+                return jsonError("Failed to load recordings");
             });
     }
 
@@ -153,7 +155,7 @@ public class AdminEndpointHandler {
             byte[] jsonBytes = OBJECT_MAPPER.writeValueAsBytes(routes);
             return ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Mono.just(new DefaultDataBufferFactory().wrap(jsonBytes)), DataBuffer.class);
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(jsonBytes)), DataBuffer.class);
         } catch (Exception e) {
             log.error("Failed to serialize route list", e);
             return ServerResponse.status(500).build();
@@ -169,6 +171,7 @@ public class AdminEndpointHandler {
             MockConfigProperties newConfig = YamlConfigParser.parse(root);
 
             MockConfigProperties old;
+            // Fix-5: synchronized 仅防止两个并发 reload 交错覆盖；路由匹配通过 AtomicReference 读取，无需持有此锁
             synchronized (holder) {
                 old = holder.get();
                 holder.set(newConfig);
@@ -177,23 +180,17 @@ public class AdminEndpointHandler {
             log.info("Config reloaded: {} endpoints + {} websockets (was {} endpoints)",
                 newConfig.getEndpoints().size(), newConfig.getWebsockets().size(),
                 old != null ? old.getEndpoints().size() : 0);
-            return "{\"status\":\"ok\",\"endpoints\":" + newConfig.getEndpoints().size()
-                + ",\"websockets\":" + newConfig.getWebsockets().size() + "}";
+            // Fix-2: ObjectNode 构建响应，避免字符串拼接
+            return obj()
+                .put("status", "ok")
+                .put("endpoints", newConfig.getEndpoints().size())
+                .put("websockets", newConfig.getWebsockets().size());
         })
         .subscribeOn(Schedulers.boundedElastic())
-        .flatMap(result -> {
-            if (result.startsWith("{\"status\":\"ok\"")) {
-                return ServerResponse.ok()
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(Mono.just(
-                        new DefaultDataBufferFactory().wrap(result.getBytes(StandardCharsets.UTF_8))),
-                        DataBuffer.class);
-            }
-            return ServerResponse.status(500)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Mono.just(
-                    new DefaultDataBufferFactory().wrap(result.getBytes(StandardCharsets.UTF_8))),
-                    DataBuffer.class);
+        .flatMap(this::jsonOk)
+        .onErrorResume(e -> {
+            log.error("Config reload failed: {}", e.getMessage(), e);
+            return jsonError("Reload failed: " + e.getMessage());
         });
     }
 
@@ -229,19 +226,41 @@ public class AdminEndpointHandler {
             return ServerResponse.ok()
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Content-Disposition", "attachment; filename=mock-service.postman_collection.json")
-                .body(Mono.just(new DefaultDataBufferFactory().wrap(jsonBytes)), DataBuffer.class);
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(jsonBytes)), DataBuffer.class);
         } catch (Exception e) {
             log.error("Failed to build Postman collection", e);
             return ServerResponse.status(500).build();
         }
     }
 
-    // ----
+    // ---- 辅助方法 ----
 
-    private Mono<ServerResponse> jsonOk(String json) {
-        return ServerResponse.ok()
-            .contentType(MediaType.APPLICATION_JSON)
-            .body(Mono.just(new DefaultDataBufferFactory().wrap(json.getBytes(StandardCharsets.UTF_8))),
-                DataBuffer.class);
+    /** Fix-2: 创建空 ObjectNode，替代手写 JSON 字符串拼接。 */
+    private ObjectNode obj() {
+        return OBJECT_MAPPER.createObjectNode();
+    }
+
+    private Mono<ServerResponse> jsonOk(ObjectNode node) {
+        try {
+            byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(node);
+            return ServerResponse.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(bytes)), DataBuffer.class);
+        } catch (Exception e) {
+            log.error("Failed to serialize response node", e);
+            return ServerResponse.status(500).build();
+        }
+    }
+
+    private Mono<ServerResponse> jsonError(String message) {
+        try {
+            byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(
+                obj().put("status", "error").put("message", message));
+            return ServerResponse.status(500)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(bytes)), DataBuffer.class);
+        } catch (Exception e) {
+            return ServerResponse.status(500).build();
+        }
     }
 }

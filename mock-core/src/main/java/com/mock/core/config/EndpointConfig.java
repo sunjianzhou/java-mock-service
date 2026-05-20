@@ -34,6 +34,8 @@ public class EndpointConfig {
         private java.util.List<ParamRule> paramRules = new java.util.ArrayList<>();
         private int errorStatus = 400;
         private String errorBody = "{\"error_no\":\"1001\",\"error_info\":\"参数校验失败\"}";
+        // Fix-7: 格式校验专用错误体（可选）；未配置时回退到 errorBody
+        private String formatErrorBody;
 
         public java.util.List<String> getRequiredParams() { return requiredParams; }
         public void setRequiredParams(java.util.List<String> requiredParams) { this.requiredParams = requiredParams; }
@@ -43,6 +45,12 @@ public class EndpointConfig {
         public void setErrorStatus(int errorStatus) { this.errorStatus = errorStatus; }
         public String getErrorBody() { return errorBody; }
         public void setErrorBody(String errorBody) { this.errorBody = errorBody; }
+        public String getFormatErrorBody() { return formatErrorBody; }
+        public void setFormatErrorBody(String formatErrorBody) { this.formatErrorBody = formatErrorBody; }
+        /** 格式校验错误体：优先 formatErrorBody，回退 errorBody。 */
+        public String resolveFormatErrorBody() {
+            return (formatErrorBody != null && !formatErrorBody.isEmpty()) ? formatErrorBody : errorBody;
+        }
     }
 
     /** 参数格式校验规则。name 为参数名，pattern 为正则表达式。 */

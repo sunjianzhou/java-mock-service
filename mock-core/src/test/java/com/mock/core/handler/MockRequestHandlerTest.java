@@ -7,6 +7,7 @@ import com.mock.core.protocol.FormUrlEncodedAdapter;
 import com.mock.core.protocol.JsonAdapter;
 import com.mock.core.protocol.ProtocolAdapter;
 import com.mock.core.protocol.XmlAdapter;
+import com.mock.core.record.InMemoryRecordingStore;
 import com.mock.core.record.RecordingStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,7 @@ class MockRequestHandlerTest {
 
     @BeforeEach
     void setUp() {
-        recordingStore = new RecordingStore();
+        recordingStore = new InMemoryRecordingStore();
         metrics = new MockMetrics();
         handler = new MockRequestHandler(Arrays.asList(
             new FormUrlEncodedAdapter(),

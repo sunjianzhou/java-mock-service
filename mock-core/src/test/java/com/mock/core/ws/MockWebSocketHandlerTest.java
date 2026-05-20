@@ -2,6 +2,7 @@ package com.mock.core.ws;
 
 import com.mock.core.config.WebSocketEndpointConfig;
 import com.mock.core.metrics.MockMetrics;
+import com.mock.core.util.ResourceReader;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ class MockWebSocketHandlerTest {
         config.setId("test-ws");
         config.setPath("/ws/test");
         config.setOnConnect("{\"type\":\"hello\",\"sid\":\"{{sessionId}}\"}");
-        handler = new MockWebSocketHandler(config, metrics);
+        handler = new MockWebSocketHandler(config, metrics, new ResourceReader());
     }
 
     @Test

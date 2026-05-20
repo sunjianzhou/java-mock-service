@@ -1,69 +1,54 @@
 package com.mock.core.handler;
 
 import com.mock.core.config.EndpointConfig;
+import com.mock.core.script.ScriptEngineExecutor;
 import com.mock.core.script.ScriptExecutor;
+import com.mock.core.util.ResourceReader;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * 响应体解析器：按优先级链解析响应内容（异步，避免阻塞事件循环）。
- * 优先级: responseScript > responseBodyFile > conditionalResponse > responseBody
+ * 响应体解析器：按 {@link BodyResolverStrategy#order()} 升序遍历责任链，
+ * 使用第一个 supports() 返回 true 的策略解析响应体。
+ *
+ * 默认优先级：Script(1) > File(2) > Conditional(3) > Static(4)
+ * 新增响应来源只需实现 BodyResolverStrategy 并标注 @Component，无需修改此类。
  */
+@Component
 public class ResponseBodyResolver {
 
-    private final ScriptExecutor scriptExecutor;
+    private final List<BodyResolverStrategy> strategies;
 
-    public ResponseBodyResolver(ScriptExecutor scriptExecutor) {
-        this.scriptExecutor = scriptExecutor;
+    /** Spring DI：自动注入所有 @Component 策略，按 order() 排序。 */
+    @Autowired
+    public ResponseBodyResolver(List<BodyResolverStrategy> strategies) {
+        this.strategies = strategies.stream()
+            .sorted(Comparator.comparingInt(BodyResolverStrategy::order))
+            .collect(Collectors.toList());
     }
 
-    /**
-     * 按优先级解析响应体 (异步):
-     *   1) responseScript（JS 脚本）— 最高，在 boundedElastic 执行
-     *   2) responseBodyFile（外部文件）— 其次，在 boundedElastic 读取
-     *   3) conditionalResponse（条件分支）— 再次，同步
-     *   4) responseBody（静态文本）— 兜底，同步
-     */
+    /** 非 Spring 场景（测试）的便捷构造器，使用默认策略链。 */
+    public ResponseBodyResolver(ScriptEngineExecutor scriptExecutor) {
+        this(Arrays.asList(
+            new ScriptBodyResolverStrategy(scriptExecutor),
+            new FileBodyResolverStrategy(new ResourceReader()),
+            new ConditionalBodyResolverStrategy(),
+            new StaticBodyResolverStrategy()
+        ));
+    }
+
     public Mono<String> resolve(EndpointConfig config, Map<String, String> params) {
-        // 1) 脚本 — 可能在事件循环阻塞，切到 boundedElastic
-        if (notBlank(config.getResponseScript())) {
-            return Mono.fromCallable(() ->
-                scriptExecutor.execute(config.getResponseScript(), params))
-                .subscribeOn(Schedulers.boundedElastic());
-        }
-        // 2) 外部文件 — 阻塞 I/O，切到 boundedElastic
-        if (notBlank(config.getResponseBodyFile())) {
-            String filePath = config.getResponseBodyFile();
-            return Mono.fromCallable(() ->
-                com.mock.core.util.ResourceReader.readFile(filePath))
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(fileContent -> {
-                    if (fileContent == null) {
-                        return "{\"error\":\"Failed to read responseBodyFile: " + filePath + "\"}";
-                    }
-                    return fileContent;
-                });
-        }
-        // 3) 条件响应 — 纯内存操作
-        EndpointConfig.ConditionalResponse cond = config.getConditionalResponse();
-        if (cond != null && cond.getParam() != null) {
-            String paramValue = params.getOrDefault(cond.getParam(), "");
-            String matchedBody = cond.getCases().get(paramValue);
-            if (matchedBody != null) {
-                return Mono.just(matchedBody);
-            }
-            if (cond.getDefaultResponse() != null) {
-                return Mono.just(cond.getDefaultResponse());
-            }
-        }
-        // 4) 静态响应体
-        return Mono.justOrEmpty(config.getResponseBody());
-    }
-
-    private static boolean notBlank(String s) {
-        return s != null && !s.isEmpty();
+        return strategies.stream()
+            .filter(s -> s.supports(config))
+            .findFirst()
+            .map(s -> s.resolve(config, params))
+            .orElse(Mono.just(""));
     }
 }
-

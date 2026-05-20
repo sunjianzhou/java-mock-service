@@ -2,6 +2,8 @@ package com.mock.core.ws;
 
 import com.mock.core.config.WebSocketEndpointConfig;
 import com.mock.core.metrics.MockMetrics;
+import com.mock.core.util.BuiltinTemplateVars;
+import com.mock.core.util.ResourceReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.reactive.socket.WebSocketHandler;
@@ -27,11 +29,14 @@ public class MockWebSocketHandler implements WebSocketHandler {
 
     private final WebSocketEndpointConfig config;
     private final MockMetrics metrics;
+    private final ResourceReader resourceReader;
     private final List<java.util.regex.Pattern> compiledPatterns;
 
-    public MockWebSocketHandler(WebSocketEndpointConfig config, MockMetrics metrics) {
+    public MockWebSocketHandler(WebSocketEndpointConfig config, MockMetrics metrics,
+                                 ResourceReader resourceReader) {
         this.config = config;
         this.metrics = metrics;
+        this.resourceReader = resourceReader;
         this.compiledPatterns = new ArrayList<>();
         if (config.getMessageHandlers() != null) {
             for (WebSocketEndpointConfig.MessageHandler handler : config.getMessageHandlers()) {
@@ -122,13 +127,13 @@ public class MockWebSocketHandler implements WebSocketHandler {
         return session.send(Mono.just(session.textMessage(msg)));
     }
 
-    /** 解析 WebSocket 消息内容：inline 文本优先，file 兜底。 */
+    /** 解析 WebSocket 消息内容：inline 文本优先，file 兜底（Fix-9：使用注入的 ResourceReader）。 */
     private String resolveWsContent(String inline, String file) {
         if (inline != null && !inline.trim().isEmpty()) {
             return inline;
         }
         if (file != null && !file.trim().isEmpty()) {
-            return com.mock.core.util.ResourceReader.readFile(file);
+            return resourceReader.readFile(file);
         }
         return null;
     }
@@ -150,6 +155,7 @@ public class MockWebSocketHandler implements WebSocketHandler {
             matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(result);
-        return result.toString();
+        // Fix-7: 再替换内置变量（{{now}} / {{uuid}} / {{seq}}）
+        return BuiltinTemplateVars.apply(result.toString());
     }
 }

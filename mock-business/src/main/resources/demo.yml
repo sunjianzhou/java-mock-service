@@ -605,7 +605,8 @@ websockets:
 #     validation.requiredParams  — 必填参数名列表
 #     validation.paramRules      — 格式校验规则（正则，详见示例 10）
 #     validation.errorStatus     — 校验失败 HTTP 状态码（默认 400）
-#     validation.errorBody       — 校验失败响应体（支持模板占位符）
+#     validation.errorBody       — 必填校验失败响应体（支持模板占位符）
+#     validation.formatErrorBody — 格式校验失败响应体（可选，不填则用 errorBody）
 #
 # 响应体解析优先级:
 #   responseScript > responseBodyFile > conditionalResponse > responseBody
@@ -613,6 +614,9 @@ websockets:
 # 响应模板语法（详见示例 9）:
 #   {{param.fieldName}}  → 替换为请求参数的值
 #   {{param.missing}}    → 参数不存在时替换为空字符串（不报错）
+#   {{now}}              → 当前时间，格式 yyyy-MM-dd'T'HH:mm:ss
+#   {{uuid}}             → 随机 UUID（每次请求不同）
+#   {{seq}}              → 全局自增序列号，从 1 开始（服务重启归零）
 #   无占位符             → 原样返回，零开销
 #
 # 模板参数来源（按优先级合并）:

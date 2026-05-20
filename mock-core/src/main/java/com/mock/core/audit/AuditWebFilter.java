@@ -36,7 +36,22 @@ public class AuditWebFilter implements WebFilter {
         int status = exchange.getResponse().getRawStatusCode();
         String query = exchange.getRequest().getURI().getRawQuery();
 
-        String pathWithQuery = query != null ? path + "?" + query : path;
+        // Fix-3: query 参数值可能含敏感数据（身份证号、生物特征等），仅记录参数名
+        String pathWithQuery = query != null ? path + "?" + maskQueryValues(query) : path;
         auditLog.info("{} {} → {} ({}ms)", method, pathWithQuery, status, duration);
+    }
+
+    private static String maskQueryValues(String query) {
+        StringBuilder sb = new StringBuilder();
+        for (String pair : query.split("&")) {
+            if (sb.length() > 0) sb.append('&');
+            int eq = pair.indexOf('=');
+            if (eq >= 0) {
+                sb.append(pair, 0, eq + 1).append("***");
+            } else {
+                sb.append(pair);
+            }
+        }
+        return sb.toString();
     }
 }

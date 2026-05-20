@@ -30,7 +30,7 @@ public final class YamlConfigParser {
     ));
 
     private static final Set<String> KNOWN_VALIDATION_KEYS = new HashSet<>(Arrays.asList(
-        "requiredParams", "paramRules", "errorStatus", "errorBody"
+        "requiredParams", "paramRules", "errorStatus", "errorBody", "formatErrorBody"
     ));
 
     private static final Set<String> KNOWN_PARAM_RULE_KEYS = new HashSet<>(Arrays.asList(
@@ -192,6 +192,9 @@ public final class YamlConfigParser {
             vc.setErrorStatus(((Number) valRaw.get("errorStatus")).intValue());
         }
         vc.setErrorBody((String) valRaw.get("errorBody"));
+        if (valRaw.containsKey("formatErrorBody")) {
+            vc.setFormatErrorBody((String) valRaw.get("formatErrorBody"));
+        }
 
         for (String key : valRaw.keySet()) {
             if (!KNOWN_VALIDATION_KEYS.contains(key)) {

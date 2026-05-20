@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory;
 
 import com.mock.core.util.JsonEscape;
 
+import org.springframework.stereotype.Component;
+
 import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
@@ -12,15 +14,14 @@ import java.util.Map;
 
 /**
  * Nashorn JavaScript 脚本执行器（Java 8 内置，零依赖）。
- *
- * 警告：Nashorn 引擎自 JDK 11 起标记为 deprecated，JDK 15 起已移除。
- * 当前项目锁定 Java 8 编译运行。如需升级 JVM 版本，请评估替换为
- * GraalVM JavaScript 引擎或迁移 Groovy。
+ * 实现 {@link ScriptEngineExecutor}，JDK 升级时可替换为 GraalVM JS 实现。
  *
  * 使用 ThreadLocal 为每个线程维护独立的 ScriptEngine 实例，
  * 避免并发 put()/eval() 导致的参数串扰。
+ * 注意：脚本中定义的全局变量会在同一线程的多次调用间累积，脚本应保持无状态。
  */
-public class ScriptExecutor {
+@Component
+public class ScriptExecutor implements ScriptEngineExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(ScriptExecutor.class);
 

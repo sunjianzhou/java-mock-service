@@ -8,6 +8,7 @@ import com.mock.core.protocol.ProtocolAdapter;
 import com.mock.core.record.RecordedExchange;
 import com.mock.core.record.RecordingStore;
 import com.mock.core.script.ScriptExecutor;
+import com.mock.core.util.BuiltinTemplateVars;
 import com.mock.core.util.JsonEscape;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,8 @@ public class MockRequestHandler {
 
     private static final Pattern TEMPLATE_PATTERN =
         Pattern.compile("\\{\\{param\\.([^}]+)\\}\\}");
+    // Fix-4: 无状态工厂，提取为静态常量
+    private static final DefaultDataBufferFactory DATA_BUFFER_FACTORY = new DefaultDataBufferFactory();
 
     private final List<ProtocolAdapter> adapters;
     private final RecordingStore recordingStore;
@@ -49,14 +52,23 @@ public class MockRequestHandler {
     private final ResponseBodyResolver responseBodyResolver;
     private final AdminEndpointHandler adminHandler;
 
+    /** Spring Bean 构造器：ResponseBodyResolver 由 Spring 注入（责任链已装配好）。 */
     public MockRequestHandler(List<ProtocolAdapter> adapters, RecordingStore recordingStore,
-                              MockMetrics metrics, String configFilePath) {
+                              MockMetrics metrics, String configFilePath,
+                              ResponseBodyResolver responseBodyResolver) {
         this.adapters = adapters;
         this.recordingStore = recordingStore;
         this.metrics = metrics;
         this.configFilePath = configFilePath;
-        this.responseBodyResolver = new ResponseBodyResolver(new ScriptExecutor());
+        this.responseBodyResolver = responseBodyResolver;
         this.adminHandler = new AdminEndpointHandler(recordingStore, metrics, configFilePath);
+    }
+
+    /** 测试便捷构造器：自动创建默认责任链（Nashorn 脚本 + 文件 + 条件 + 静态）。 */
+    public MockRequestHandler(List<ProtocolAdapter> adapters, RecordingStore recordingStore,
+                              MockMetrics metrics, String configFilePath) {
+        this(adapters, recordingStore, metrics, configFilePath,
+             new ResponseBodyResolver(new ScriptExecutor()));
     }
 
     public Mono<ServerResponse> handle(ServerRequest request, EndpointConfig config) {
@@ -105,18 +117,20 @@ public class MockRequestHandler {
             }
             EndpointConfig.ValidationConfig validation = config.getValidation();
             if (validation != null && hasMissingRequired(merged, validation)) {
-                return buildErrorResponse(validation, merged, config)
+                return buildErrorResponse(validation, merged, config, validation.getErrorBody())
                     .doOnSuccess(resp -> doRecord(method, path, config, merged,
                         validation.getErrorStatus(), config.getResponseContentType(),
-                        applyTemplate(validation.getErrorBody(), merged)))
+                        applyTemplateWithType(validation.getErrorBody(), merged, config.getResponseContentType())))
                     .doFinally(s -> metrics.recordRequest(method, config.getId(),
                         validation.getErrorStatus(), System.currentTimeMillis() - start));
             }
+            // Fix-7: 格式校验失败使用 formatErrorBody（未配置时回退到 errorBody），与必填缺失错误可区分
             if (validation != null && hasInvalidFormat(merged, validation)) {
-                return buildErrorResponse(validation, merged, config)
+                String formatErrBody = validation.resolveFormatErrorBody();
+                return buildErrorResponse(validation, merged, config, formatErrBody)
                     .doOnSuccess(resp -> doRecord(method, path, config, merged,
                         validation.getErrorStatus(), config.getResponseContentType(),
-                        applyTemplate(validation.getErrorBody(), merged)))
+                        applyTemplateWithType(formatErrBody, merged, config.getResponseContentType())))
                     .doFinally(s -> metrics.recordRequest(method, config.getId(),
                         validation.getErrorStatus(), System.currentTimeMillis() - start));
             }
@@ -179,37 +193,57 @@ public class MockRequestHandler {
         return false;
     }
 
-    /** 对模板字符串中的 {{param.xxx}} 占位符进行参数替换。JSON 值自动转义。 */
+    /** 对模板字符串中的 {{param.xxx}} 占位符进行参数替换（测试直接调用，保留兼容签名）。 */
     String applyTemplate(String template, Map<String, String> params) {
-        if (template == null || !template.contains("{{param.")) {
+        // 无 contentType 时回退到内容启发式判断（仅供测试调用）
+        return applyTemplateInternal(template, params, isJsonTemplate(template));
+    }
+
+    /** Fix-6: 内部调用版本，基于 contentType 判断是否 JSON 转义，比内容启发式更准确。 */
+    private String applyTemplateWithType(String template, Map<String, String> params, String contentType) {
+        boolean escapeJson = contentType != null
+            ? contentType.toLowerCase().contains("json")
+            : isJsonTemplate(template);
+        return applyTemplateInternal(template, params, escapeJson);
+    }
+
+    private String applyTemplateInternal(String template, Map<String, String> params, boolean escapeJson) {
+        if (template == null || !template.contains("{{")) {
             return template;
         }
-        Matcher matcher = TEMPLATE_PATTERN.matcher(template);
-        StringBuffer result = new StringBuffer();
-        while (matcher.find()) {
-            String paramName = matcher.group(1);
-            String value = params.getOrDefault(paramName, "");
-            // 对 JSON 上下文中的值进行转义（仅当模板看起来是 JSON 时）
-            if (isJsonTemplate(template)) {
-                value = JsonEscape.escape(value);
+        // Fix-7: 先替换参数占位符，再替换内置变量（两者 pattern 不重叠，顺序无关）
+        String result = template;
+        if (result.contains("{{param.")) {
+            Matcher matcher = TEMPLATE_PATTERN.matcher(result);
+            StringBuffer sb = new StringBuffer();
+            while (matcher.find()) {
+                String paramName = matcher.group(1);
+                String value = params.getOrDefault(paramName, "");
+                if (escapeJson) {
+                    value = JsonEscape.escape(value);
+                }
+                matcher.appendReplacement(sb, Matcher.quoteReplacement(value));
             }
-            matcher.appendReplacement(result, Matcher.quoteReplacement(value));
+            matcher.appendTail(sb);
+            result = sb.toString();
         }
-        matcher.appendTail(result);
-        return result.toString();
+        return BuiltinTemplateVars.apply(result);
     }
 
     private boolean isJsonTemplate(String template) {
+        if (template == null) return false;
         String trimmed = template.trim();
         return (trimmed.startsWith("{") || trimmed.startsWith("["))
             && (trimmed.endsWith("}") || trimmed.endsWith("]"));
     }
 
+    // Fix-7: errorBodyTemplate 参数使两类验证失败可返回不同响应体
     private Mono<ServerResponse> buildErrorResponse(EndpointConfig.ValidationConfig validation,
                                                      Map<String, String> params,
-                                                     EndpointConfig config) {
-        String body = applyTemplate(validation.getErrorBody(), params);
-        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+                                                     EndpointConfig config,
+                                                     String errorBodyTemplate) {
+        String body = applyTemplateWithType(errorBodyTemplate, params, config.getResponseContentType());
+        byte[] bodyBytes = body != null ? body.getBytes(StandardCharsets.UTF_8) : new byte[0];
         MediaType contentType;
         try {
             contentType = MediaType.valueOf(config.getResponseContentType());
@@ -219,7 +253,7 @@ public class MockRequestHandler {
         return ServerResponse
             .status(HttpStatus.valueOf(validation.getErrorStatus()))
             .contentType(contentType)
-            .body(Mono.just(new DefaultDataBufferFactory().wrap(bodyBytes)), DataBuffer.class);
+            .body(Mono.just(DATA_BUFFER_FACTORY.wrap(bodyBytes)), DataBuffer.class);  // Fix-4
     }
 
     private Mono<ServerResponse> buildSuccessResponse(EndpointConfig config, String body) {
@@ -229,7 +263,7 @@ public class MockRequestHandler {
             delay = delay + ThreadLocalRandom.current().nextLong(
                 config.getResponseDelayMax() - delay + 1);
         }
-        Mono<DataBuffer> bodyMono = Mono.just(new DefaultDataBufferFactory().wrap(bodyBytes));
+        Mono<DataBuffer> bodyMono = Mono.just(DATA_BUFFER_FACTORY.wrap(bodyBytes));  // Fix-4
         if (delay > 0) {
             bodyMono = bodyMono.delayElement(Duration.ofMillis(delay));
         }
@@ -250,14 +284,15 @@ public class MockRequestHandler {
                 if (config.getResponseScript() != null && !config.getResponseScript().isEmpty()) {
                     return raw;
                 }
-                return applyTemplate(raw, params);
+                // Fix-6: 使用 contentType 判断是否 JSON 转义，比内容启发式更准确
+                return applyTemplateWithType(raw, params, config.getResponseContentType());
             });
     }
 
     private Mono<ServerResponse> buildReplayResponse(RecordedExchange replay) {
         String body = replay.getResponseBody() != null ? replay.getResponseBody() : "";
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
-        Mono<DataBuffer> bodyMono = Mono.just(new DefaultDataBufferFactory().wrap(bodyBytes));
+        Mono<DataBuffer> bodyMono = Mono.just(DATA_BUFFER_FACTORY.wrap(bodyBytes));  // Fix-4
         if (replay.getResponseDelay() > 0) {
             bodyMono = bodyMono.delayElement(Duration.ofMillis(replay.getResponseDelay()));
         }

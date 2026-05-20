@@ -85,7 +85,8 @@ public class PostmanCollectionBuilder {
                 body.put("urlencoded", urlencoded);
             } else if (ep.getContentType().contains("json")) {
                 body.put("mode", "raw");
-                body.put("raw", ep.getResponseBody() != null ? ep.getResponseBody() : "{}");
+                // Fix-1: 请求体用必填参数骨架，而非响应体（原来的 responseBody 是响应示例，不是请求体）
+                body.put("raw", buildJsonRequestSkeleton(ep));
                 Map<String, String> options = new LinkedHashMap<>();
                 options.put("raw", "{ \"language\": \"json\" }");
                 body.put("options", options);
@@ -98,5 +99,23 @@ public class PostmanCollectionBuilder {
 
         item.put("request", request);
         return item;
+    }
+
+    /** 根据 requiredParams 生成 JSON 请求体骨架（空值占位），用于 Postman 快速填参。 */
+    private String buildJsonRequestSkeleton(EndpointConfig ep) {
+        if (ep.getValidation() == null
+                || ep.getValidation().getRequiredParams() == null
+                || ep.getValidation().getRequiredParams().isEmpty()) {
+            return "{}";
+        }
+        StringBuilder sb = new StringBuilder("{\n");
+        List<String> params = ep.getValidation().getRequiredParams();
+        for (int i = 0; i < params.size(); i++) {
+            sb.append("  \"").append(params.get(i)).append("\": \"\"");
+            if (i < params.size() - 1) sb.append(",");
+            sb.append("\n");
+        }
+        sb.append("}");
+        return sb.toString();
     }
 }

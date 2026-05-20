@@ -33,7 +33,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ConfigFileWatcher {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigFileWatcher.class);
-    private static final org.yaml.snakeyaml.Yaml YAML = new org.yaml.snakeyaml.Yaml();
+    // Fix-2: SafeConstructor 禁止 !! 标签实例化任意 Java 类，防止 YAML 注入
+    private static final org.yaml.snakeyaml.Yaml YAML =
+        new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor());
 
     private final ReloadableConfigHolder holder;
     private final String watchPath;
@@ -100,6 +102,10 @@ public class ConfigFileWatcher {
                         continue;
                     }
                     for (WatchEvent<?> event : key.pollEvents()) {
+                        // Fix-1: OVERFLOW 事件 context() 不是 Path，跳过否则 ClassCastException 会崩溃监听线程
+                        if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                            continue;
+                        }
                         Path changed = watchedDir.resolve((Path) event.context());
                         if (changed.toFile().getAbsolutePath().equals(file.getAbsolutePath())) {
                             long now = System.currentTimeMillis();
@@ -146,6 +152,8 @@ public class ConfigFileWatcher {
             MockConfigProperties newConfig = YamlConfigParser.parse(root);
 
             MockConfigProperties old;
+            // Fix-5: synchronized 仅防止两个并发 reload 操作交错覆盖；
+            // 路由匹配路径通过 AtomicReference 直接读取，无需持有此锁
             synchronized (holder) {
                 old = holder.get();
                 holder.set(newConfig);

@@ -4,6 +4,7 @@ import com.mock.core.config.MockConfigProperties;
 import com.mock.core.config.ReloadableConfigHolder;
 import com.mock.core.config.WebSocketEndpointConfig;
 import com.mock.core.metrics.MockMetrics;
+import com.mock.core.util.ResourceReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -24,25 +25,25 @@ public class WebSocketRouteConfiguration {
     private static final Logger log = LoggerFactory.getLogger(WebSocketRouteConfiguration.class);
 
     @Bean
-    public HandlerMapping webSocketHandlerMapping(ReloadableConfigHolder holder, MockMetrics metrics) {
+    public HandlerMapping webSocketHandlerMapping(ReloadableConfigHolder holder,
+                                                   MockMetrics metrics,
+                                                   ResourceReader resourceReader) {
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
         mapping.setOrder(1);
 
-        // 初始加载
-        refreshMapping(mapping, holder.get(), metrics);
-
-        // 注册热加载回调：配置变更时自动刷新 WS 路由
-        holder.setOnReload(() -> refreshMapping(mapping, holder.get(), metrics));
+        refreshMapping(mapping, holder.get(), metrics, resourceReader);
+        holder.setOnReload(() -> refreshMapping(mapping, holder.get(), metrics, resourceReader));
 
         return mapping;
     }
 
     private void refreshMapping(SimpleUrlHandlerMapping mapping,
-                                 MockConfigProperties config, MockMetrics metrics) {
+                                 MockConfigProperties config, MockMetrics metrics,
+                                 ResourceReader resourceReader) {
         Map<String, WebSocketHandler> handlerMap = new LinkedHashMap<>();
         if (config.getWebsockets() != null) {
             for (WebSocketEndpointConfig wsConfig : config.getWebsockets()) {
-                MockWebSocketHandler handler = new MockWebSocketHandler(wsConfig, metrics);
+                MockWebSocketHandler handler = new MockWebSocketHandler(wsConfig, metrics, resourceReader);
                 handlerMap.put(wsConfig.getPath(), handler);
                 log.info("Registered WebSocket endpoint: {} -> {} (id={})",
                     wsConfig.getPath(), wsConfig.getDescription(), wsConfig.getId());
