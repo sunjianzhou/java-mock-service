@@ -1,0 +1,33 @@
+spring:
+  config:
+    import:
+      - classpath:mock-endpoints.yml
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  codec:
+    max-in-memory-size: 1MB
+  reactor:
+    schedulers:
+      boundedElastic:
+        size: 8
+        queue-size: 100000
+
+server:
+  port: 8080
+  shutdown: graceful
+  max-http-header-size: 16KB
+  netty:
+    connection-timeout: 30s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true

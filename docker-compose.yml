@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  mock-service:
+    build: .
+    image: mock-service:1.0.0
+    container_name: mock-service
+    ports:
+      - "8080:8080"
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx256m"
+    volumes:
+      # 挂载外部配置文件（可选，用于热加载）
+      - ./mock-business/src/main/resources/mock-endpoints.yml:/config/mock-endpoints.yml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped

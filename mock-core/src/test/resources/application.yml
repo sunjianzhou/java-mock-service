@@ -1,0 +1,156 @@
+mock:
+  endpoints:
+    - id: test-zt
+      description: "证通简项测试"
+      method: POST
+      path: /mock/ias/zt/id-card
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"error_no":"0","results":[{"status":"1"}]}
+
+    - id: test-eid
+      description: "金联汇通简项测试"
+      method: POST
+      pathPattern: /vals-ap/identity/{type}/sync/{appId}
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"version":"1.0.0","result":"0000"}
+
+    - id: test-nacao
+      description: "组代中心SOAP测试"
+      method: POST
+      path: /service/nacao
+      contentType: text/xml
+      responseContentType: text/xml
+      responseStatus: 200
+      responseBody: |
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+          <soap:Body><NACAORESPONSE><ENVELOPE><RECODE>01</RECODE></ENVELOPE></NACAORESPONSE></soap:Body>
+        </soap:Envelope>
+      validation:
+        requiredParams:
+          - JGMC
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"缺少必填字段 JGMC"}
+
+    - id: test-wsdl
+      description: "WSDL文件"
+      method: GET
+      path: /mock/wsdl/nacao
+      responseContentType: text/xml
+      responseStatus: 200
+      responseBody: |
+        <wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"/>
+
+    - id: test-validation
+      description: "参数校验测试端点"
+      method: POST
+      path: /mock/test/validation
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"error_no":"0","error_info":"success"}
+      validation:
+        requiredParams:
+          - certseq
+          - usernm
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败"}
+
+    - id: test-template
+      description: "模板引擎测试端点"
+      method: POST
+      path: /mock/test/template
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"error_no":"0","name":"{{param.name}}","idNo":"{{param.idNo}}"}
+      validation:
+        requiredParams:
+          - name
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","missing":"{{param.name}}"}
+
+    - id: test-delay
+      description: "响应延迟测试端点"
+      method: POST
+      path: /mock/test/delay
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseDelay: 100
+      responseBody: |
+        {"result":"delayed"}
+
+    - id: test-path-vars
+      description: "路径变量模板测试端点"
+      method: POST
+      pathPattern: /api/users/{userId}/orders/{orderId}
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"userId":"{{param.userId}}","orderId":"{{param.orderId}}"}
+
+    - id: test-format
+      description: "格式校验测试端点"
+      method: POST
+      path: /mock/test/format
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"error_no":"0","idNo":"{{param.idNo}}"}
+      validation:
+        requiredParams:
+          - idNo
+        paramRules:
+          - name: idNo
+            pattern: "^\\d{18}$"
+            errorMessage: "idNo 必须是18位数字"
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1002","error_info":"格式校验失败: {{param.idNo}}"}
+
+    - id: test-conditional
+      description: "条件响应测试端点"
+      method: POST
+      path: /mock/test/conditional
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {"result":"default"}
+      conditionalResponse:
+        param: status
+        cases:
+          "0": |
+            {"code":"0","message":"success","data":"{{param.name}}"}
+          "1": |
+            {"code":"1","message":"fail","reason":"{{param.name}}"}
+        defaultResponse: |
+          {"code":"-1","message":"unknown status","value":"{{param.status}}"}
+  websockets:
+    - id: ws-echo
+      description: "WebSocket Echo 测试"
+      path: /ws/echo
+      onConnect: "{\"type\":\"connected\",\"sessionId\":\"{{sessionId}}\"}"
+      onDisconnect: "{\"type\":\"disconnected\"}"
+      messageHandlers:
+        - pattern: "ping"
+          response: "pong"
+        - pattern: ".*"
+          response: "{\"type\":\"echo\",\"original\":\"{{message}}\"}"
+      heartbeat:
+        interval: 30000
+        message: "{\"type\":\"ping\"}"
+      delay: 0

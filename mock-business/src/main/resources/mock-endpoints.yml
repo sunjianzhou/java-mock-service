@@ -1,0 +1,399 @@
+mock:
+  endpoints:
+    # ===== 证通简项身份证认证 (form-encoded) =====
+    - id: zt-id-card
+      description: "证通简项身份证认证"
+      method: POST
+      path: /mock/ias/zt/id-card
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "error_no": "0",
+          "error_info": "",
+          "dsName": ["results"],
+          "results": [{
+            "cerkey": "",
+            "respinfo": "认证一致",
+            "mpssim": 85.5,
+            "biztyp": "A001",
+            "status": "1",
+            "sysSeqNb": "MOCK202605180001",
+            "respcd": "0000",
+            "certseq": "",
+            "accountName": "测试姓名",
+            "name": "测试姓名",
+            "ptyAcct": "cdforxx",
+            "ptycd": "cdforxx",
+            "localsim": 88.2,
+            "telephone": ""
+          }]
+        }
+      validation:
+        requiredParams:
+          - certseq
+          - usernm
+          - biztyp
+          - ptyacct
+          - ptycd
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 证通人像认证 (form-encoded) =====
+    - id: zt-id-image
+      description: "证通人像认证"
+      method: POST
+      path: /mock/ias/zt/id-image
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "error_no": "0",
+          "error_info": "",
+          "dsName": ["results"],
+          "results": [{
+            "cerkey": "",
+            "respinfo": "认证一致（人像）",
+            "status": "1",
+            "mpssim": 90.0,
+            "facePicMPS": "",
+            "sysSeqNb": "MOCK202605180002",
+            "biztyp": "A001",
+            "respcd": "0000",
+            "certseq": "",
+            "accountName": "测试姓名",
+            "name": "测试姓名",
+            "ptyAcct": "cdforxx",
+            "ptycd": "cdforxx",
+            "localsim": 92.1,
+            "telephone": ""
+          }]
+        }
+      validation:
+        requiredParams:
+          - certseq
+          - usernm
+          - videopic
+          - biztyp
+          - ptyacct
+          - ptycd
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 证通绿卡简项认证 (form-encoded) =====
+    - id: zt-green-card
+      description: "证通绿卡简项认证"
+      method: POST
+      path: /mock/ias/zt/green-card
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "error_no": "0",
+          "error_info": "",
+          "dsName": ["results"],
+          "results": [{
+            "ptyacct": "cdforxx",
+            "respinfo": "认证一致（绿卡简项）",
+            "sysseqnb": "MOCK202605190004",
+            "respcd": "0000",
+            "status": "1"
+          }]
+        }
+      validation:
+        requiredParams:
+          - idNumber
+          - name
+          - nation
+          - idType
+          - biztyp
+          - ptyacct
+          - ptycd
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 证通绿卡人像认证 (form-encoded) =====
+    - id: zt-green-card-image
+      description: "证通绿卡人像认证"
+      method: POST
+      path: /mock/ias/zt/green-card-image
+      contentType: application/x-www-form-urlencoded
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "error_no": "0",
+          "error_info": "",
+          "dsName": ["results"],
+          "results": [{
+            "ptyacct": "cdforxx",
+            "respinfo": "认证一致（绿卡人像）",
+            "sysseqnb": "MOCK202605190005",
+            "respcd": "0000",
+            "status": "1"
+          }]
+        }
+      validation:
+        requiredParams:
+          - idNumber
+          - name
+          - nation
+          - idType
+          - photoData
+          - biztyp
+          - ptyacct
+          - ptycd
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 金联汇通简项身份证认证 (JSON + pathPattern) =====
+    # pathPattern 支持动态路径变量 {type} 和 {appId}，模拟真实金联汇通URL结构
+    # 其余3个金联汇通端点使用独立mock路径，因4个端点共享同一URL模式仅靠biz_type区分
+    - id: eid-id-card
+      description: "金联汇通简项身份证认证"
+      method: POST
+      pathPattern: "/vals-ap/identity/{type}/sync/{appId}"
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "version": "1.0.0",
+          "result": "0000",
+          "result_detail": "认证一致",
+          "result_msg": "成功",
+          "result_time": "2026-05-19T12:00:00",
+          "biz_sequence_id": "MOCK202605190003",
+          "security_factor": "{\"encrypt_factor\":\"abcdef1234567890\",\"sign_factor\":\"fedcba0987654321\"}",
+          "sign_type": "SM3",
+          "sign": "MOCK_SIGN_EID_ID_CARD_20260519",
+          "encrypt_type": "SM4",
+          "appeidcode": "MOCK_APP_EID_CODE_001"
+        }
+      validation:
+        requiredParams:
+          - app_id
+          - biz_type
+          - user_id_info
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 金联汇通人像认证 (JSON) =====
+    - id: eid-id-image
+      description: "金联汇通人像认证"
+      method: POST
+      path: /mock/eid/id-image
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "version": "1.0.0",
+          "result": "0000",
+          "result_detail": "认证一致（人像）",
+          "result_msg": "成功",
+          "result_time": "2026-05-19T12:00:00",
+          "biz_sequence_id": "MOCK202605190006",
+          "security_factor": "{\"encrypt_factor\":\"abcdef1234567890\",\"sign_factor\":\"fedcba0987654321\"}",
+          "sign_type": "SM3",
+          "sign": "MOCK_SIGN_EID_IMAGE_20260519",
+          "encrypt_type": "SM4",
+          "appeidcode": "MOCK_APP_EID_CODE_001"
+        }
+      validation:
+        requiredParams:
+          - app_id
+          - biz_type
+          - user_id_info
+          - image
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 金联汇通绿卡简项认证 (JSON) =====
+    - id: eid-green-card
+      description: "金联汇通绿卡简项认证"
+      method: POST
+      path: /mock/eid/green-card
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "version": "1.0.0",
+          "result": "0000",
+          "result_detail": "认证一致（绿卡简项）",
+          "result_msg": "成功",
+          "result_time": "2026-05-19T12:00:00",
+          "biz_sequence_id": "MOCK202605190007",
+          "security_factor": "{\"encrypt_factor\":\"abcdef1234567890\",\"sign_factor\":\"fedcba0987654321\"}",
+          "sign_type": "SM3",
+          "sign": "MOCK_SIGN_EID_GREEN_CARD_20260519",
+          "encrypt_type": "SM4",
+          "appeidcode": "MOCK_APP_EID_CODE_001"
+        }
+      validation:
+        requiredParams:
+          - app_id
+          - biz_type
+          - user_id_info
+          - nation
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 金联汇通绿卡人像认证 (JSON) =====
+    - id: eid-green-card-image
+      description: "金联汇通绿卡人像认证"
+      method: POST
+      path: /mock/eid/green-card-image
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "version": "1.0.0",
+          "result": "0000",
+          "result_detail": "认证一致（绿卡人像）",
+          "result_msg": "成功",
+          "result_time": "2026-05-19T12:00:00",
+          "biz_sequence_id": "MOCK202605190008",
+          "security_factor": "{\"encrypt_factor\":\"abcdef1234567890\",\"sign_factor\":\"fedcba0987654321\"}",
+          "sign_type": "SM3",
+          "sign": "MOCK_SIGN_EID_GREEN_IMAGE_20260519",
+          "encrypt_type": "SM4",
+          "appeidcode": "MOCK_APP_EID_CODE_001"
+        }
+      validation:
+        requiredParams:
+          - app_id
+          - biz_type
+          - user_id_info
+          - nation
+          - image
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 北京数字认证组织机构认证 (JSON + HMAC-SHA256) =====
+    - id: bjca-org
+      description: "北京数字认证组织机构认证"
+      method: POST
+      path: /mock/bjca/org
+      contentType: application/json
+      responseContentType: application/json
+      responseStatus: 200
+      responseBody: |
+        {
+          "status": "0",
+          "message": "查询成功",
+          "trace": "MOCK_TRACE_BJCA_20260519",
+          "data": {
+            "orgName": "Mock测试机构名称",
+            "orgCode": "12345678-9",
+            "legalPerson": "测试法人",
+            "regCapital": "1000万元",
+            "establishDate": "2020-01-01",
+            "orgStatus": "1"
+          }
+        }
+      validation:
+        requiredParams:
+          - enterpriseName
+          - enterpriseMark
+          - signature
+        errorStatus: 400
+        errorBody: |
+          {"error_no":"1001","error_info":"参数校验失败: 缺少必填字段"}
+
+    # ===== 组代中心组织机构查询 (SOAP/XML via CXF) =====
+    - id: nacao-org
+      description: "组代中心组织机构查询"
+      method: POST
+      path: /service/nacao
+      contentType: text/xml
+      responseContentType: text/xml
+      responseStatus: 200
+      responseBody: |
+        <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+          <soap:Body>
+            <NACAORESPONSE>
+              <ENVELOPE>
+                <RECODE>01</RECODE>
+                <MESSAGE>信息正常 — {{param.JGMC}}</MESSAGE>
+                <DATASIZE>1</DATASIZE>
+              </ENVELOPE>
+              <DATAINFO>
+                <EnterPrise>
+                  <JGMC>{{param.JGMC}}</JGMC>
+                  <ZZJGDM>{{param.ZZJGDM}}</ZZJGDM>
+                  <BGRQ>2026-05-19</BGRQ>
+                  <JYQXE>1000000.00</JYQXE>
+                </EnterPrise>
+              </DATAINFO>
+            </NACAORESPONSE>
+          </soap:Body>
+        </soap:Envelope>
+      validation:
+        requiredParams:
+          - JGMC
+          - ZZJGDM
+        errorStatus: 400
+        errorBody: |
+          <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+            <soap:Body>
+              <NACAORESPONSE>
+                <ENVELOPE>
+                  <RECODE>99</RECODE>
+                  <MESSAGE>参数校验失败: 缺少必填字段 JGMC / ZZJGDM (已提供: {{param.JGMC}} / {{param.ZZJGDM}})</MESSAGE>
+                </ENVELOPE>
+              </NACAORESPONSE>
+            </soap:Body>
+          </soap:Envelope>
+
+    # ===== 组代中心WSDL文件 (CXF JaxWsDynamicClientFactory 初始化) =====
+    - id: nacao-wsdl
+      description: "组代中心WSDL文件"
+      method: GET
+      path: /mock/wsdl/nacao
+      responseContentType: text/xml
+      responseStatus: 200
+      responseBody: |
+        <wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+          xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+          xmlns:tns="http://service.business.nacao.ninemax.com"
+          targetNamespace="http://service.business.nacao.ninemax.com">
+          <wsdl:message name="searchDMInfoRequest">
+            <wsdl:part name="arg0" type="xsd:string"/>
+          </wsdl:message>
+          <wsdl:message name="searchDMInfoResponse">
+            <wsdl:part name="return" type="xsd:string"/>
+          </wsdl:message>
+          <wsdl:portType name="SearchService">
+            <wsdl:operation name="searchDMInfo">
+              <wsdl:input message="tns:searchDMInfoRequest"/>
+              <wsdl:output message="tns:searchDMInfoResponse"/>
+            </wsdl:operation>
+          </wsdl:portType>
+          <wsdl:binding name="SearchServiceBinding" type="tns:SearchService">
+            <soap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+            <wsdl:operation name="searchDMInfo">
+              <soap:operation soapAction=""/>
+              <wsdl:input><soap:body use="literal" namespace="http://service.business.nacao.ninemax.com"/></wsdl:input>
+              <wsdl:output><soap:body use="literal" namespace="http://service.business.nacao.ninemax.com"/></wsdl:output>
+            </wsdl:operation>
+          </wsdl:binding>
+          <wsdl:service name="SearchService">
+            <wsdl:port name="SearchServicePort" binding="tns:SearchServiceBinding">
+              <soap:address location="http://localhost:8080/service/nacao"/>
+            </wsdl:port>
+          </wsdl:service>
+        </wsdl:definitions>

@@ -1,0 +1,10 @@
+{
+  "code": "0",
+  "message": "This response was loaded from classpath:responses/demo-response.json",
+  "timestamp": "2026-05-19T12:00:00",
+  "data": {
+    "id": "demo-001",
+    "name": "{{param.name}}",
+    "status": "active"
+  }
+}

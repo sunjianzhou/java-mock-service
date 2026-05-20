@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mock Service 管理控制台</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#f0f2f5; color:#333; }
+header { background:#1a1a2e; color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+header h1 { font-size:20px; }
+.status-dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+.status-dot.on { background:#52c41a; }
+.status-dot.off { background:#d9d9d9; }
+nav { background:#16213e; display:flex; padding:0 24px; }
+nav a { color:#a0aec0; text-decoration:none; padding:12px 20px; font-size:14px; border-bottom:2px solid transparent; cursor:pointer; }
+nav a:hover, nav a.active { color:#fff; border-bottom-color:#4299e1; }
+main { max-width:1200px; margin:24px auto; padding:0 24px; }
+.section { display:none; }
+.section.active { display:block; }
+.card { background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); padding:20px; margin-bottom:20px; }
+.card h2 { font-size:16px; margin-bottom:16px; color:#1a1a2e; }
+table { width:100%; border-collapse:collapse; }
+th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #f0f0f0; font-size:13px; }
+th { background:#fafafa; font-weight:600; color:#666; }
+tr:hover { background:#f5f5ff; }
+.tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:600; }
+.tag-post { background:#e6f7ff; color:#1890ff; }
+.tag-get { background:#f6ffed; color:#52c41a; }
+.tag-ok { background:#f6ffed; color:#52c41a; }
+.tag-err { background:#fff2f0; color:#ff4d4f; }
+.btn { display:inline-block; padding:8px 16px; border:none; border-radius:6px; font-size:13px; cursor:pointer; text-decoration:none; margin-right:8px; }
+.btn-primary { background:#4299e1; color:#fff; }
+.btn-primary:hover { background:#3182ce; }
+.btn-danger { background:#e53e3e; color:#fff; }
+.btn-danger:hover { background:#c53030; }
+.btn-default { background:#e2e8f0; color:#4a5568; }
+.btn-default:hover { background:#cbd5e0; }
+.btn:disabled { opacity:0.5; cursor:not-allowed; }
+.controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+.badge { display:inline-block; padding:2px 10px; border-radius:12px; font-size:13px; }
+.badge-recording { background:#fff2f0; color:#ff4d4f; }
+.badge-replaying { background:#fff7e6; color:#fa8c16; }
+#toast { position:fixed; top:20px; right:20px; background:#52c41a; color:#fff; padding:10px 20px; border-radius:6px; opacity:0; transition:opacity 0.3s; z-index:999; }
+#toast.show { opacity:1; }
+.recording-item { background:#fafafa; border-radius:6px; padding:12px; margin-bottom:8px; font-size:13px; }
+.recording-item pre { background:#1a1a2e; color:#e2e8f0; padding:8px; border-radius:4px; overflow-x:auto; font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mock Service 管理控制台</h1>
+  <span id="globalStatus">● 就绪</span>
+</header>
+
+<nav>
+  <a class="active" data-section="endpoints">Endpoints</a>
+  <a data-section="recording">录制</a>
+  <a data-section="replay">回放</a>
+  <a data-section="config">配置</a>
+</nav>
+
+<main>
+  <!-- Endpoints -->
+  <div id="endpoints" class="section active">
+    <div class="card">
+      <div class="controls">
+        <h2>已注册端点 (<span id="epCount">-</span>)</h2>
+        <button class="btn btn-primary" onclick="refreshEndpoints()">刷新</button>
+      </div>
+      <table>
+        <thead><tr><th>Method</th><th>Path</th><th>ID</th><th>描述</th></tr></thead>
+        <tbody id="epTable"><tr><td colspan="4">加载中...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 录制 -->
+  <div id="recording" class="section">
+    <div class="card">
+      <h2>录制控制</h2>
+      <div class="controls">
+        <button id="recStartBtn" class="btn btn-danger" onclick="startRecording()">开始录制</button>
+        <button id="recStopBtn" class="btn btn-default" onclick="stopRecording()">停止录制</button>
+        <button class="btn btn-default" onclick="listRecordings()">刷新列表</button>
+        <span id="recStatus" style="font-size:13px;color:#999;">录制已停止</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>录制记录 (<span id="recCount">0</span>)</h2>
+      <div class="controls">
+        <button class="btn btn-default" onclick="saveRecordings()">保存到文件</button>
+        <button class="btn btn-default" onclick="loadRecordings()">从文件加载</button>
+        <button class="btn btn-danger" onclick="clearRecordings()">清空</button>
+      </div>
+      <div id="recList"><p style="color:#999;">暂无录制记录</p></div>
+    </div>
+  </div>
+
+  <!-- 回放 -->
+  <div id="replay" class="section">
+    <div class="card">
+      <h2>回放控制</h2>
+      <div class="controls">
+        <button id="replayStartBtn" class="btn btn-primary" onclick="startReplay()">开启回放模式</button>
+        <button id="replayStopBtn" class="btn btn-default" onclick="stopReplay()">关闭回放模式</button>
+        <span id="replayStatus" style="font-size:13px;color:#999;">回放已关闭</span>
+      </div>
+      <p style="font-size:13px;color:#999;margin-top:8px;">
+        回放模式下，匹配的请求将直接返回已录制的响应，不再执行参数校验或模板渲染。
+      </p>
+    </div>
+  </div>
+
+  <!-- 配置 -->
+  <div id="config" class="section">
+    <div class="card">
+      <h2>配置热加载 & 工具</h2>
+      <p style="font-size:13px;color:#999;margin-bottom:12px;">
+        重新读取 classpath:mock-endpoints.yml 并刷新所有路由（无需重启服务）。
+      </p>
+      <button class="btn btn-primary" onclick="reloadConfig()">热加载配置</button>
+        <button class="btn btn-primary" onclick="exportPostman()">导出 Postman</button>
+        <a class="btn btn-default" href="/actuator/prometheus" target="_blank">Prometheus</a>
+        <a class="btn btn-default" href="/swagger-ui.html" target="_blank">Swagger</a>
+      <span id="reloadResult" style="font-size:13px;margin-left:12px;"></span>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const API = {
+  routes: '/mock/_admin/routes',
+  reload: '/mock/_admin/reload',
+  recStart: '/mock/_admin/record/start',
+  recStop: '/mock/_admin/record/stop',
+  recList: '/mock/_admin/recordings',
+  recSave: '/mock/_admin/recordings/save',
+  recLoad: '/mock/_admin/recordings/load',
+  replayStart: '/mock/_admin/replay/start',
+  postman: '/mock/_admin/postman',
+  replayStop: '/mock/_admin/replay/stop'
+};
+
+function toast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(function() { el.classList.remove('show'); }, 2000);
+}
+
+function ajax(method, url, body) {
+  var opts = { method: method, headers: {} };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(url, opts).then(function(r) {
+    if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+    var ct = r.headers.get('content-type') || '';
+    return ct.indexOf('application/json') >= 0 ? r.json() : r.text();
+  });
+}
+
+// ---- Navigation ----
+document.querySelectorAll('nav a').forEach(function(a) {
+  a.addEventListener('click', function() {
+    document.querySelectorAll('nav a').forEach(function(x) { x.classList.remove('active'); });
+    document.querySelectorAll('.section').forEach(function(x) { x.classList.remove('active'); });
+    a.classList.add('active');
+    document.getElementById(a.dataset.section).classList.add('active');
+  });
+});
+
+// ---- Endpoints ----
+function refreshEndpoints() {
+  ajax('GET', API.routes).then(function(routes) {
+    document.getElementById('epCount').textContent = routes.length;
+    var html = '';
+    routes.forEach(function(ep) {
+      var tag = ep.method === 'GET' ? 'tag-get' : (ep.method === 'WS' ? 'tag-ok' : 'tag-post');
+      var path = ep.pathPattern || ep.path || '-';
+      var methodLabel = ep.method;
+      if (ep.type === 'websocket') {
+        methodLabel = 'WS ↑↓';
+      }
+      html += '<tr><td><span class="tag '+tag+'">' + methodLabel + '</span></td>'
+        + '<td><code>' + path + '</code></td>'
+        + '<td>' + (ep.id || '-') + '</td>'
+        + '<td>' + (ep.description || '-') + '</td></tr>';
+    });
+    document.getElementById('epTable').innerHTML = html || '<tr><td colspan="4">无端点</td></tr>';
+  }).catch(function(e) { toast('加载失败: ' + e.message); });
+}
+
+// ---- Recording ----
+function startRecording() {
+  ajax('POST', API.recStart).then(function(r) {
+    document.getElementById('recStartBtn').disabled = true;
+    document.getElementById('recStatus').innerHTML = '<span class="badge badge-recording">录制中...</span>';
+    toast('录制已开启');
+  }).catch(function(e) { toast('失败: ' + e.message); });
+}
+function stopRecording() {
+  ajax('POST', API.recStop).then(function(r) {
+    document.getElementById('recStartBtn').disabled = false;
+    document.getElementById('recStatus').textContent = '录制已停止 (' + (r.count || 0) + ' 条)';
+    toast('录制已停止');
+  }).catch(function(e) { toast('失败: ' + e.message); });
+}
+function listRecordings() {
+  ajax('GET', API.recList).then(function(list) {
+    document.getElementById('recCount').textContent = list.length;
+    var html = '';
+    list.forEach(function(rec) {
+      html += '<div class="recording-item">'
+        + '<strong>' + rec.method + '</strong> ' + rec.path
+        + ' <span style="color:#999;">' + (rec.endpointId || '') + '</span>'
+        + ' <span class="tag tag-ok">' + rec.responseStatus + '</span>'
+        + '<pre>' + (rec.responseBody || '').replace(/</g,'&lt;') + '</pre>'
+        + '</div>';
+    });
+    document.getElementById('recList').innerHTML = html || '<p style="color:#999;">暂无录制记录</p>';
+  }).catch(function(e) { toast('加载失败: ' + e.message); });
+}
+function saveRecordings() {
+  ajax('POST', API.recSave).then(function(r) { toast('已保存'); }).catch(function(e) { toast('失败: ' + e.message); });
+}
+function loadRecordings() {
+  ajax('POST', API.recLoad).then(function(r) {
+    toast('已加载 ' + (r.loaded || 0) + ' 条');
+    listRecordings();
+  }).catch(function(e) { toast('失败: ' + e.message); });
+}
+function clearRecordings() {
+  if (!confirm('确认清空所有录制记录？')) return;
+  ajax('DELETE', API.recList).then(function(r) {
+    document.getElementById('recCount').textContent = '0';
+    document.getElementById('recList').innerHTML = '<p style="color:#999;">暂无录制记录</p>';
+    toast('已清空');
+  }).catch(function(e) { toast('失败: ' + e.message); });
+}
+
+// ---- Replay ----
+function startReplay() {
+  ajax('POST', API.replayStart).then(function(r) {
+    document.getElementById('replayStartBtn').disabled = true;
+    document.getElementById('replayStatus').innerHTML = '<span class="badge badge-replaying">回放模式开启</span>';
+    toast('回放模式已开启');
+  }).catch(function(e) { toast('失败: ' + e.message); });
+}
+function stopReplay() {
+  ajax('POST', API.replayStop).then(function(r) {
+    document.getElementById('replayStartBtn').disabled = false;
+    document.getElementById('replayStatus').textContent = '回放已关闭';
+    toast('回放模式已关闭');
+  }).catch(function(e) { toast('失败: ' + e.message); });
+}
+
+function exportPostman() {
+  fetch(API.postman).then(function(r) {
+    if (!r.ok) throw new Error(r.status);
+    return r.blob();
+  }).then(function(blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'mock-service.postman_collection.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Postman Collection 已下载');
+  }).catch(function(e) { toast('导出失败: ' + e.message); });
+}
+
+// ---- Config ----
+function reloadConfig() {
+  ajax('POST', API.reload).then(function(r) {
+    document.getElementById('reloadResult').textContent = '✓ 重载成功 (' + (r.endpoints || 0) + ' 个端点)';
+    refreshEndpoints();
+  }).catch(function(e) {
+    document.getElementById('reloadResult').textContent = '✗ 重载失败: ' + e.message;
+  });
+}
+
+// ---- Init ----
+refreshEndpoints();
+listRecordings();
+</script>
+</body>
+</html>

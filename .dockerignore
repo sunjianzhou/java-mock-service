@@ -1,0 +1,28 @@
+# Maven
+target/classes/
+target/test-classes/
+target/maven-status/
+target/surefire-reports/
+target/maven-archiver/
+target/*.original
+target/generated-sources/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md
+!README.md
+
+# Logs
+*.log
