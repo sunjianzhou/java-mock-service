@@ -270,6 +270,32 @@ public class AdminEndpointHandler {
         }
     }
 
+    // ---- 统计 & 请求日志 ----
+
+    public Mono<ServerResponse> stats() {
+        try {
+            byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(metrics.getEndpointStats());
+            return ServerResponse.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(bytes)), DataBuffer.class);
+        } catch (Exception e) {
+            log.error("Failed to serialize stats", e);
+            return ServerResponse.status(500).build();
+        }
+    }
+
+    public Mono<ServerResponse> requestLog() {
+        try {
+            byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(metrics.getRecentRequests());
+            return ServerResponse.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Mono.just(DATA_BUFFER_FACTORY.wrap(bytes)), DataBuffer.class);
+        } catch (Exception e) {
+            log.error("Failed to serialize request log", e);
+            return ServerResponse.status(500).build();
+        }
+    }
+
     // ---- Postman 导出 ----
 
     public Mono<ServerResponse> exportPostman(MockConfigProperties config) {

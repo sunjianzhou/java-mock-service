@@ -8,6 +8,7 @@ import com.mock.core.protocol.ProtocolAdapter;
 import com.mock.core.record.RecordedExchange;
 import com.mock.core.record.RecordingStore;
 import com.mock.core.script.ScriptExecutor;
+import com.mock.core.metrics.RequestLogEntry;
 import com.mock.core.util.BuiltinTemplateVars;
 import com.mock.core.util.JsonEscape;
 import org.slf4j.Logger;
@@ -117,32 +118,60 @@ public class MockRequestHandler {
             }
             EndpointConfig.ValidationConfig validation = config.getValidation();
             if (validation != null && hasMissingRequired(merged, validation)) {
+                String errBody = applyTemplateWithType(validation.getErrorBody(), merged, config.getResponseContentType());
                 return buildErrorResponse(validation, merged, config, validation.getErrorBody())
                     .doOnSuccess(resp -> doRecord(method, path, config, merged,
-                        validation.getErrorStatus(), config.getResponseContentType(),
-                        applyTemplateWithType(validation.getErrorBody(), merged, config.getResponseContentType())))
-                    .doFinally(s -> metrics.recordRequest(method, config.getId(),
-                        validation.getErrorStatus(), System.currentTimeMillis() - start));
+                        validation.getErrorStatus(), config.getResponseContentType(), errBody))
+                    .doFinally(s -> {
+                        long dur = System.currentTimeMillis() - start;
+                        metrics.recordRequest(method, config.getId(), validation.getErrorStatus(), dur);
+                        metrics.addRequestLog(buildLogEntry(method, path, config.getId(), merged,
+                            validation.getErrorStatus(), dur, errBody));
+                    });
             }
             // Fix-7: 格式校验失败使用 formatErrorBody（未配置时回退到 errorBody），与必填缺失错误可区分
             if (validation != null && hasInvalidFormat(merged, validation)) {
                 String formatErrBody = validation.resolveFormatErrorBody();
+                String appliedBody = applyTemplateWithType(formatErrBody, merged, config.getResponseContentType());
                 return buildErrorResponse(validation, merged, config, formatErrBody)
                     .doOnSuccess(resp -> doRecord(method, path, config, merged,
-                        validation.getErrorStatus(), config.getResponseContentType(),
-                        applyTemplateWithType(formatErrBody, merged, config.getResponseContentType())))
-                    .doFinally(s -> metrics.recordRequest(method, config.getId(),
-                        validation.getErrorStatus(), System.currentTimeMillis() - start));
+                        validation.getErrorStatus(), config.getResponseContentType(), appliedBody))
+                    .doFinally(s -> {
+                        long dur = System.currentTimeMillis() - start;
+                        metrics.recordRequest(method, config.getId(), validation.getErrorStatus(), dur);
+                        metrics.addRequestLog(buildLogEntry(method, path, config.getId(), merged,
+                            validation.getErrorStatus(), dur, appliedBody));
+                    });
             }
             return resolveResponseBody(config, merged)
                 .flatMap(body -> buildSuccessResponse(config, body)
                     .doOnSuccess(resp -> doRecord(method, path, config, merged,
-                        config.getResponseStatus(), config.getResponseContentType(), body)))
-                .doFinally(s -> metrics.recordRequest(method, config.getId(),
-                    config.getResponseStatus(), System.currentTimeMillis() - start));
+                        config.getResponseStatus(), config.getResponseContentType(), body))
+                    .doFinally(s -> {
+                        long dur = System.currentTimeMillis() - start;
+                        metrics.recordRequest(method, config.getId(), config.getResponseStatus(), dur);
+                        metrics.addRequestLog(buildLogEntry(method, path, config.getId(), merged,
+                            config.getResponseStatus(), dur, body));
+                    }));
         });
     }
 
+
+    private RequestLogEntry buildLogEntry(String method, String path, String endpointId,
+                                          Map<String, String> params, int status,
+                                          long durationMs, String body) {
+        RequestLogEntry e = new RequestLogEntry();
+        e.setMethod(method);
+        e.setPath(path);
+        e.setEndpointId(endpointId);
+        e.setParams(new LinkedHashMap<>(params));
+        e.setStatus(status);
+        e.setDurationMs(durationMs);
+        if (body != null) {
+            e.setResponsePreview(body.length() > 200 ? body.substring(0, 200) + "…" : body);
+        }
+        return e;
+    }
 
     private void doRecord(String method, String path, EndpointConfig config,
                           Map<String, String> params, int status, String contentType,
@@ -329,4 +358,6 @@ public class MockRequestHandler {
     public Mono<ServerResponse> reload(ServerRequest request, ReloadableConfigHolder holder) { return adminHandler.reload(request, holder); }
     public Mono<ServerResponse> apply(ServerRequest request, ReloadableConfigHolder holder) { return adminHandler.apply(request, holder); }
     public Mono<ServerResponse> exportPostman(MockConfigProperties config) { return adminHandler.exportPostman(config); }
+    public Mono<ServerResponse> stats()      { return adminHandler.stats(); }
+    public Mono<ServerResponse> requestLog() { return adminHandler.requestLog(); }
 }

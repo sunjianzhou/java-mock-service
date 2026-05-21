@@ -7,6 +7,14 @@ import io.micrometer.core.instrument.Timer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -16,10 +24,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 public class MockMetrics {
 
+    private static final int MAX_LOG = 200;
+
     private MeterRegistry registry = Metrics.globalRegistry;
     private final AtomicInteger wsSessionCount = new AtomicInteger(0);
     private final AtomicInteger recordingGauge = new AtomicInteger(0);
     private final AtomicInteger replayGauge = new AtomicInteger(0);
+
+    /** 每个端点的请求统计：endpointId → [total, success(<400), error(>=400)] */
+    private final ConcurrentHashMap<String, long[]> endpointStats = new ConcurrentHashMap<>();
+    /** 最近请求日志（最多 MAX_LOG 条，最新在前） */
+    private final Deque<RequestLogEntry> requestLog = new ArrayDeque<>();
 
     private final java.util.concurrent.ConcurrentHashMap<String, Counter> counterCache =
         new java.util.concurrent.ConcurrentHashMap<>();
@@ -69,6 +84,44 @@ public class MockMetrics {
                 .tag("endpoint", ep)
                 .register(registry));
         timer.record(durationMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+        // 更新端点统计计数
+        endpointStats.compute(ep, (k, v) -> {
+            if (v == null) v = new long[3];
+            v[0]++;                         // total
+            if (status < 400) v[1]++;       // success
+            else               v[2]++;       // error
+            return v;
+        });
+    }
+
+    /**
+     * 记录一条请求日志（由 MockRequestHandler 在请求完成时调用）。
+     * 超过 MAX_LOG 条时淘汰最旧的记录。
+     */
+    public synchronized void addRequestLog(RequestLogEntry entry) {
+        while (requestLog.size() >= MAX_LOG) requestLog.pollFirst();
+        requestLog.addLast(entry);
+    }
+
+    /** 返回最近请求列表（最新在前），副本，线程安全。 */
+    public synchronized List<RequestLogEntry> getRecentRequests() {
+        List<RequestLogEntry> list = new ArrayList<>(requestLog);
+        Collections.reverse(list);
+        return list;
+    }
+
+    /** 返回每个端点的统计：{endpointId → {total, success, error}}。 */
+    public Map<String, Map<String, Long>> getEndpointStats() {
+        Map<String, Map<String, Long>> result = new LinkedHashMap<>();
+        endpointStats.forEach((ep, counts) -> {
+            Map<String, Long> m = new LinkedHashMap<>();
+            m.put("total",   counts[0]);
+            m.put("success", counts[1]);
+            m.put("error",   counts[2]);
+            result.put(ep, m);
+        });
+        return result;
     }
 
     public void setRecordingActive(boolean active) {
