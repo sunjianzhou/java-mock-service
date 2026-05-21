@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import javax.annotation.PreDestroy;
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -27,7 +28,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 文件监听器：监视 mock-endpoints.yml 文件变更，自动触发配置热加载。
- * 仅在 watch-path 属性配置为文件系统路径时启用（如 file:./config/mock-endpoints.yml）。
+ *
+ * 路径解析优先级：
+ * 1. 显式配置 mock.watch-path（如 file:./config/mock-endpoints.yml）
+ * 2. 自动探测 classpath:mock-endpoints.yml 的文件系统绝对路径（IDE/源码运行时有效）
+ * 3. 文件在 JAR 包内时，热更新不可用，仅打印说明
  */
 @Component
 public class ConfigFileWatcher {
@@ -58,16 +63,9 @@ public class ConfigFileWatcher {
 
     @EventListener(ApplicationReadyEvent.class)
     public void startWatching() {
-        if (watchPath == null || watchPath.isEmpty()) {
-            log.info("文件热更新未启用（mock.watch-path 未配置）。" +
-                "服务已正常启动，管理页面所有功能均可使用。" +
-                "如需自动热更新，启动时添加参数: --mock.watch-path=file:/path/to/mock-endpoints.yml");
+        String fsPath = resolveWatchPath();
+        if (fsPath == null) {
             return;
-        }
-
-        String fsPath = watchPath;
-        if (fsPath.startsWith("file:")) {
-            fsPath = fsPath.substring(5);
         }
 
         File file = new File(fsPath);
@@ -83,6 +81,30 @@ public class ConfigFileWatcher {
 
         running.set(true);
         executor.submit(() -> watchLoop(file, watchedDir));
+    }
+
+    /**
+     * 解析要监听的文件系统路径：
+     * 1. 显式配置 mock.watch-path 时直接使用
+     * 2. 否则尝试将 classpath:mock-endpoints.yml 解析为文件系统路径（IDE/源码模式下可行）
+     * 3. 文件在 JAR 包内时（getFile() 抛 IOException），热更新不可用，返回 null
+     */
+    private String resolveWatchPath() {
+        if (watchPath != null && !watchPath.isEmpty()) {
+            return watchPath.startsWith("file:") ? watchPath.substring(5) : watchPath;
+        }
+        try {
+            ClassPathResource resource = new ClassPathResource("mock-endpoints.yml");
+            if (resource.exists()) {
+                File file = resource.getFile(); // JAR 内时抛 IOException
+                log.info("自动检测到配置文件: {}，启用文件热更新监听", file.getAbsolutePath());
+                return file.getAbsolutePath();
+            }
+        } catch (IOException ignored) {
+            log.info("mock-endpoints.yml 已从 classpath 加载（文件位于 JAR 包内），文件系统热更新不可用。" +
+                "如需热更新，将配置文件放到 JAR 外部并启动时添加: --mock.watch-path=file:/路径/mock-endpoints.yml");
+        }
+        return null;
     }
 
     private void watchLoop(File file, Path watchedDir) {
