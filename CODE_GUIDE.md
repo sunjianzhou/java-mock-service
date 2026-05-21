@@ -212,7 +212,8 @@ get()            // 读取当前配置（无锁，路由匹配时高频调用）
 7. applyTemplateWithType() 替换 {{param.xxx}} + {{now}}/{{uuid}}/{{seq}}
 8. buildSuccessResponse() 加延迟、设响应头、返回
 9. doRecord() 如果处于录制模式，记录本次交换
-10. metrics.recordRequest() 统计指标
+10. metrics.recordRequest() 更新 Prometheus Counter/Timer
+11. metrics.addRequestLog(buildLogEntry()) 写入最近请求日志（供管理控制台统计面板使用）
 ```
 
 模板方法体系：
@@ -488,7 +489,7 @@ String execute(String script, Map<String, String> params)
 
 - 通过 `@Value("${mock.admin.api-key:}")` 注入，**未配置时跳过鉴权**（向后兼容）
 - `@Order(-100)` 在所有过滤器中优先级较高，确保在路由匹配之前执行
-- 无效或缺少 Key → 直接返回 401，不继续 filter chain
+- 无效或缺少 Key → 返回 401 + JSON body `{"status":"error","message":"Unauthorized: invalid or missing X-API-Key"}`，不继续 filter chain
 
 ---
 
@@ -512,21 +513,26 @@ String execute(String script, Map<String, String> params)
 
 #### `MockMetrics.java`
 
-**职责**：向 Prometheus 暴露 Mock 服务的自定义指标。
+**职责**：双重职责——向 Prometheus 暴露自定义指标，同时作为管理控制台统计数据的存储后端。
 
-指标说明：
+**Prometheus 指标**：
 | 指标名 | 类型 | 维度 | 说明 |
 |--------|------|------|------|
 | `mock_requests_total` | Counter | method / endpoint / status | 请求计数 |
-| `mock_request_duration_seconds` | Histogram | method / endpoint | 请求延迟分布 |
+| `mock_request_duration_seconds` | Timer | method / endpoint | 请求延迟分布 |
 | `mock_websocket_sessions` | Gauge | — | 当前 WS 连接数 |
 | `mock_recording_active` | Gauge | — | 录制状态（0/1） |
 | `mock_replay_active` | Gauge | — | 回放状态（0/1） |
 
-实现细节：
+**管理统计存储**：
+- `endpointStats`（`ConcurrentHashMap<String, long[]>`）：每个端点的 `[total, success, error]` 计数，`getEndpointStats()` 供 `/mock/_admin/stats` 消费
+- `requestLog`（`Deque<RequestLogEntry>`，容量上限 `MAX_LOG=200`）：最近请求快照，`addRequestLog()` 由 `MockRequestHandler` 在每次请求完成时写入，`getRecentRequests()` 供 `/mock/_admin/requests` 消费（返回列表最新在前）
+
+**实现细节**：
 - `@Autowired(required = false)` 注入 `MeterRegistry`，测试环境回退到 `Metrics.globalRegistry`
 - Counter / Timer 按 `method|endpointId` / `method|endpointId|status` 缓存，避免每次请求重复 `register`
 - `ensureGauges()` 用双重检查锁（DCL）确保 Gauge 只注册一次
+- `addRequestLog()` / `getRecentRequests()` 加 `synchronized(this)` 保证线程安全
 
 ---
 
@@ -696,11 +702,14 @@ welcome（onConnect 消息）
 spring.config.import: classpath:mock-endpoints.yml   # 引入端点配置（与 application.yml 同目录）
 server.port: 8080
 server.shutdown: graceful                             # 优雅停机，等待处理中的请求完成
+server.max-http-header-size: 16KB                    # 防止大请求头被拒绝（SOAP SOAPAction 等）
+server.netty.connection-timeout: 30s
 spring.codec.max-in-memory-size: 1MB                 # 请求体最大缓冲（超大 XML/JSON 时调大）
 spring.reactor.schedulers.boundedElastic:
   size: 8          # 阻塞任务线程池大小（脚本执行、文件 I/O）
   queue-size: 100000
 management.endpoints.web.exposure.include: health,info,metrics,prometheus  # Actuator 暴露端点
+management.endpoint.health.show-details: always
 ```
 
 ---
