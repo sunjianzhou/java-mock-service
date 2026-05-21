@@ -327,5 +327,6 @@ public class MockRequestHandler {
 
     public Mono<ServerResponse> listRoutes(MockConfigProperties config) { return adminHandler.listRoutes(config); }
     public Mono<ServerResponse> reload(ServerRequest request, ReloadableConfigHolder holder) { return adminHandler.reload(request, holder); }
+    public Mono<ServerResponse> apply(ServerRequest request, ReloadableConfigHolder holder) { return adminHandler.apply(request, holder); }
     public Mono<ServerResponse> exportPostman(MockConfigProperties config) { return adminHandler.exportPostman(config); }
 }

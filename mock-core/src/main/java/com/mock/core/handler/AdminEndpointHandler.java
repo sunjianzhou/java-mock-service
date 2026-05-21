@@ -140,6 +140,26 @@ public class AdminEndpointHandler {
                 m.put("pathPattern", ep.getPathPattern());
             }
             m.put("description", ep.getDescription());
+            // 详细字段（供管理页面展示）
+            m.put("contentType", ep.getContentType());
+            m.put("responseContentType", ep.getResponseContentType());
+            m.put("responseStatus", ep.getResponseStatus());
+            m.put("responseDelay", ep.getResponseDelay());
+            m.put("responseDelayMax", ep.getResponseDelayMax());
+            m.put("hasScript",      ep.getResponseScript() != null && !ep.getResponseScript().isEmpty());
+            m.put("hasFile",        ep.getResponseBodyFile() != null && !ep.getResponseBodyFile().isEmpty());
+            m.put("hasConditional", ep.getConditionalResponse() != null);
+            // 响应体预览（截断避免数据量过大）
+            String body = ep.getResponseBody();
+            if (body != null && body.length() > 200) body = body.substring(0, 200) + "…";
+            m.put("responseBodyPreview", body);
+            // 校验配置摘要
+            if (ep.getValidation() != null) {
+                Map<String, Object> v = new LinkedHashMap<>();
+                v.put("requiredParams", ep.getValidation().getRequiredParams());
+                v.put("errorStatus", ep.getValidation().getErrorStatus());
+                m.put("validation", v);
+            }
             routes.add(m);
         }
         for (com.mock.core.config.WebSocketEndpointConfig ws : config.getWebsockets()) {
@@ -160,6 +180,39 @@ public class AdminEndpointHandler {
             log.error("Failed to serialize route list", e);
             return ServerResponse.status(500).build();
         }
+    }
+
+    // ---- YAML 内容直接应用（管理页面编辑器使用）----
+
+    @SuppressWarnings("unchecked")
+    public Mono<ServerResponse> apply(ServerRequest request, ReloadableConfigHolder holder) {
+        return request.bodyToMono(String.class)
+            .flatMap(yaml -> Mono.fromCallable(() -> {
+                org.yaml.snakeyaml.Yaml snakeYaml =
+                    new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor());
+                java.util.Map<String, Object> root =
+                    (java.util.Map<String, Object>) snakeYaml.load(yaml);
+                com.mock.core.config.MockConfigProperties newConfig =
+                    com.mock.core.config.YamlConfigParser.parse(root);
+                com.mock.core.config.MockConfigProperties old;
+                synchronized (holder) {
+                    old = holder.get();
+                    holder.set(newConfig);
+                }
+                log.info("Config applied via editor: {} endpoints + {} websockets (was {} endpoints)",
+                    newConfig.getEndpoints().size(), newConfig.getWebsockets().size(),
+                    old != null ? old.getEndpoints().size() : 0);
+                return obj()
+                    .put("status", "ok")
+                    .put("endpoints", newConfig.getEndpoints().size())
+                    .put("websockets", newConfig.getWebsockets().size());
+            }))
+            .subscribeOn(Schedulers.boundedElastic())
+            .flatMap(this::jsonOk)
+            .onErrorResume(e -> {
+                log.error("Config apply failed: {}", e.getMessage(), e);
+                return jsonError("Apply failed: " + e.getMessage());
+            });
     }
 
     // ---- 热加载 ----
