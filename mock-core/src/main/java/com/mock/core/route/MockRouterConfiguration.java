@@ -87,7 +87,9 @@ public class MockRouterConfiguration {
                     return Mono.just(serverRequest -> handler.handle(serverRequest, ep));
                 }
             }
-            return Mono.just(serverRequest -> ServerResponse.notFound().build());
+            // Mono.empty() 让请求继续传递给下一个 HandlerMapping（如静态资源处理器），
+            // 避免把 /mock-admin.html 等静态资源路径误拦截为 404。
+            return Mono.empty();
         };
     }
 
