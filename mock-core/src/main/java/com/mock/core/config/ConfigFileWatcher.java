@@ -59,7 +59,9 @@ public class ConfigFileWatcher {
     @EventListener(ApplicationReadyEvent.class)
     public void startWatching() {
         if (watchPath == null || watchPath.isEmpty()) {
-            log.info("mock.watch-path 未配置，文件监听未启用");
+            log.info("文件热更新未启用（mock.watch-path 未配置）。" +
+                "服务已正常启动，管理页面所有功能均可使用。" +
+                "如需自动热更新，启动时添加参数: --mock.watch-path=file:/path/to/mock-endpoints.yml");
             return;
         }
 

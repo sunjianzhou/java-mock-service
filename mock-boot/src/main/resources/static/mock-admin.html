@@ -580,7 +580,7 @@ function loadStats(){
         +'</tr>';
     });
     document.getElementById('statsTbody').innerHTML=html||'<tr><td colspan="5" class="empty">暂无统计</td></tr>';
-  }).catch(function(e){toast('统计加载失败: '+e.message,'err');});
+  }).catch(function(e){toast('统计加载失败 [GET /mock/_admin/stats]: '+e.message,'err');});
 }
 function loadRequests(){
   ajax('GET','/mock/_admin/requests').then(function(list){
@@ -606,7 +606,7 @@ function loadRequests(){
         +'</div></div>';
     });
     document.getElementById('reqLogList').innerHTML=html;
-  }).catch(function(e){toast('请求日志加载失败: '+e.message,'err');});
+  }).catch(function(e){toast('请求日志加载失败 [GET /mock/_admin/requests]: '+e.message,'err');});
 }
 function toggleLog(i){
   var el=document.getElementById('log-body-'+i);
@@ -761,9 +761,21 @@ function initStatus(){
     if(s.replaying) setReplayState(true, 0);
   }).catch(function(){});
 }
+function checkConnectivity(){
+  fetch('/mock/_admin/routes').then(function(r){
+    if(!r.ok){
+      document.getElementById('headerMeta').textContent='⚠ 服务响应异常 (HTTP '+r.status+')，请检查后端是否为最新版本';
+      document.getElementById('headerMeta').style.color='#fc8181';
+    }
+  }).catch(function(){
+    document.getElementById('headerMeta').textContent='⚠ 无法连接服务 (network error)';
+    document.getElementById('headerMeta').style.color='#fc8181';
+  });
+}
 loadEndpoints();
 listRecordings();
 initStatus();
+checkConnectivity();
 </script>
 </body>
 </html>
