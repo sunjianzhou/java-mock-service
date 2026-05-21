@@ -10,8 +10,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.LinkedList;
+import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -31,7 +32,7 @@ public class InMemoryRecordingStore implements RecordingStore {
     private enum Mode { IDLE, RECORDING, REPLAYING }
 
     private String storageDir = "recordings";
-    private final List<RecordedExchange> recordings = new LinkedList<>();
+    private final Deque<RecordedExchange> recordings = new ArrayDeque<>();
     private final AtomicReference<Mode> mode = new AtomicReference<>(Mode.IDLE);
 
     @Override public boolean isRecording() { return mode.get() == Mode.RECORDING; }
@@ -76,9 +77,9 @@ public class InMemoryRecordingStore implements RecordingStore {
     public void add(RecordedExchange record) {
         synchronized (recordings) {
             while (recordings.size() >= MAX_RECORDINGS) {
-                recordings.remove(0);
+                recordings.pollFirst();
             }
-            recordings.add(record);
+            recordings.addLast(record);
         }
     }
 

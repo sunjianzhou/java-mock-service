@@ -16,7 +16,7 @@ public final class BuiltinTemplateVars {
     private static final AtomicLong SEQUENCE = new AtomicLong(0);
     private static final DateTimeFormatter DATETIME_FMT =
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
-    public static final Pattern PATTERN =
+    private static final Pattern PATTERN =
         Pattern.compile("\\{\\{(now|uuid|seq)\\}\\}");
 
     private BuiltinTemplateVars() {}
@@ -25,12 +25,11 @@ public final class BuiltinTemplateVars {
     public static String apply(String template) {
         if (template == null || !template.contains("{{")) return template;
         Matcher m = PATTERN.matcher(template);
-        if (!m.find()) return template;
-        m.reset();
         StringBuffer sb = new StringBuffer();
         while (m.find()) {
             m.appendReplacement(sb, Matcher.quoteReplacement(resolve(m.group(1))));
         }
+        if (sb.length() == 0) return template;  // 无匹配，返回原串
         m.appendTail(sb);
         return sb.toString();
     }
