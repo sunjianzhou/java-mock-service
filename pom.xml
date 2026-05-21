@@ -20,7 +20,6 @@
 
     <modules>
         <module>mock-core</module>
-        <module>mock-business</module>
         <module>mock-boot</module>
     </modules>
 
