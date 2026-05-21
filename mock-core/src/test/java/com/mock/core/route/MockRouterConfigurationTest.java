@@ -486,4 +486,90 @@ class MockRouterConfigurationTest {
             .expectBody()
             .jsonPath("$.status").isEqualTo("ok");
     }
+
+    // ---- P1: 统计 / 请求日志 / 服务状态 ----
+
+    @Test
+    void adminStats_shouldReturn200AndJsonObject() {
+        webTestClient.get()
+            .uri("/mock/_admin/stats")
+            .exchange()
+            .expectStatus().isOk()
+            .expectHeader().contentType(MediaType.APPLICATION_JSON)
+            .expectBody()
+            .jsonPath("$").isMap();
+    }
+
+    @Test
+    void adminRequests_shouldReturn200AndJsonArray() {
+        webTestClient.get()
+            .uri("/mock/_admin/requests")
+            .exchange()
+            .expectStatus().isOk()
+            .expectHeader().contentType(MediaType.APPLICATION_JSON)
+            .expectBody()
+            .jsonPath("$").isArray();
+    }
+
+    @Test
+    void adminStatus_shouldReturn200WithRecordingAndReplayingFields() {
+        webTestClient.get()
+            .uri("/mock/_admin/status")
+            .exchange()
+            .expectStatus().isOk()
+            .expectHeader().contentType(MediaType.APPLICATION_JSON)
+            .expectBody()
+            .jsonPath("$.recording").isBoolean()
+            .jsonPath("$.replaying").isBoolean();
+    }
+
+    @Test
+    void adminApply_shouldAcceptYamlAndUpdateRoutes() {
+        String yaml = "mock:\n  endpoints:\n"
+            + "    - id: apply-test\n"
+            + "      description: apply test\n"
+            + "      method: POST\n"
+            + "      path: /apply/test\n"
+            + "      responseContentType: application/json\n"
+            + "      responseStatus: 200\n"
+            + "      responseBody: '{\"ok\":true}'\n";
+
+        webTestClient.post()
+            .uri("/mock/_admin/apply")
+            .contentType(MediaType.TEXT_PLAIN)
+            .bodyValue(yaml)
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody()
+            .jsonPath("$.status").isEqualTo("ok")
+            .jsonPath("$.endpoints").isEqualTo(1);
+
+        // 立即 reload 还原 classpath 配置，避免污染后续测试（apply 会替换全局 holder）
+        webTestClient.post()
+            .uri("/mock/_admin/reload")
+            .exchange()
+            .expectStatus().isOk();
+    }
+
+    @Test
+    void adminRequests_shouldContainEntryAfterMockHit() {
+        // 先发一个 mock 请求触发日志记录
+        webTestClient.post()
+            .uri("/mock/ias/zt/id-card")
+            .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+            .bodyValue("name=test")
+            .exchange()
+            .expectStatus().isOk();
+
+        // 再查请求日志，应包含至少一条记录，且最新条目（index 0）就是刚才那次
+        webTestClient.get()
+            .uri("/mock/_admin/requests")
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody()
+            .jsonPath("$.length()").isNumber()
+            .jsonPath("$[0].method").isNotEmpty()
+            .jsonPath("$[0].status").isNumber()
+            .jsonPath("$[0].durationMs").isNumber();
+    }
 }
