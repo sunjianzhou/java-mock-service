@@ -111,6 +111,23 @@ tr:hover{background:#f7f9ff}
 #toast.ok{background:#52c41a;opacity:1}
 #toast.err{background:#ff4d4f;opacity:1}
 .empty{text-align:center;padding:28px;color:#aaa}
+/* Bench */
+.bench-cfg{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;margin-bottom:12px}
+.bench-cfg-item label{display:block;font-size:11px;color:#888;margin-bottom:3px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.bench-cfg-item input,.bench-cfg-item select{width:100%;padding:6px 10px;border:1px solid #d9d9d9;border-radius:6px;font-size:13px;outline:none}
+.bench-cfg-item input:focus,.bench-cfg-item select:focus{border-color:#4299e1}
+.bench-metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:10px;margin-bottom:14px}
+.bench-m{background:#f7f9ff;border-radius:8px;padding:12px 8px;text-align:center;border:1px solid #e8eef6}
+.bench-m .mv{font-size:22px;font-weight:700;color:#2d3748;line-height:1.1}
+.bench-m .ml{font-size:10px;color:#888;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+.bench-prog{background:#f0f0f0;border-radius:6px;height:12px;overflow:hidden;margin:8px 0 4px}
+.bench-prog-bar{height:100%;background:linear-gradient(90deg,#4299e1,#48bb78);border-radius:6px;transition:width .2s;width:0}
+.bench-dist-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;font-size:12px}
+.bench-dist-lbl{width:78px;text-align:right;color:#666;flex-shrink:0;font-size:11px}
+.bench-dist-bw{flex:1;background:#ededf0;border-radius:3px;height:16px;overflow:hidden}
+.bench-dist-bf{height:100%;border-radius:3px}
+.bench-dist-n{width:48px;text-align:right;color:#555;flex-shrink:0}
+.bench-dist-p{width:44px;text-align:right;color:#aaa;flex-shrink:0;font-size:11px}
 </style>
 </head>
 <body>
@@ -184,6 +201,61 @@ tr:hover{background:#f7f9ff}
     <div class="card-title">响应结果</div>
     <div class="resp-meta" id="testRespMeta"></div>
     <div class="resp-box" id="testRespBody"></div>
+  </div>
+
+  <!-- ===== 压力测试区块 ===== -->
+  <div class="card" style="border-top:3px solid #4299e1">
+    <div class="card-title">⚡ 压力测试 <span style="font-size:12px;font-weight:400;color:#888">— 复用上方端点选择，对同一接口发起并发请求</span></div>
+    <div class="bench-cfg">
+      <div class="bench-cfg-item">
+        <label>并发数 (1–200)</label>
+        <input type="number" id="benchConcurrency" value="10" min="1" max="200">
+      </div>
+      <div class="bench-cfg-item">
+        <label>请求总数</label>
+        <input type="number" id="benchTotal" value="200" min="1" max="50000">
+      </div>
+      <div class="bench-cfg-item">
+        <label>单请求超时(ms)</label>
+        <input type="number" id="benchTimeout" value="5000" min="100" max="60000">
+      </div>
+      <div class="bench-cfg-item" style="display:flex;align-items:flex-end">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-danger" id="benchStartBtn" onclick="startBench()">▶ 开始压测</button>
+          <button class="btn btn-ghost" id="benchStopBtn" onclick="stopBench()" disabled>■ 中止</button>
+          <button class="btn btn-ghost" onclick="clearBenchResult()">清空</button>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:#bbb;margin-top:4px;line-height:1.6">
+      提示：复用「端点选择」和「请求参数」中的值发起压测。浏览器 HTTP/1.1 对同一 host 默认约 6 个并发连接，实际并发受此限制；HTTP/2 无此约束。结果适合相对对比，不代表服务器极限吞吐。
+    </p>
+  </div>
+
+  <div id="benchResultCard" style="display:none">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:14px;font-weight:600" id="benchStatusTxt">运行中…</span>
+        <span style="font-size:12px;color:#888" id="benchElapsed"></span>
+      </div>
+      <div class="bench-prog"><div class="bench-prog-bar" id="benchProgBar"></div></div>
+      <div style="text-align:center;font-size:12px;color:#666;margin-bottom:14px" id="benchProgTxt">0 / 0</div>
+      <div class="bench-metrics">
+        <div class="bench-m"><div class="mv" id="bm-tput">—</div><div class="ml">吞吐量(req/s)</div></div>
+        <div class="bench-m"><div class="mv" id="bm-ok" style="color:#389e0d">—</div><div class="ml">成功</div></div>
+        <div class="bench-m"><div class="mv" id="bm-err">—</div><div class="ml">错误</div></div>
+        <div class="bench-m"><div class="mv" id="bm-avg">—</div><div class="ml">平均(ms)</div></div>
+        <div class="bench-m"><div class="mv" id="bm-p50">—</div><div class="ml">P50(ms)</div></div>
+        <div class="bench-m"><div class="mv" id="bm-p95">—</div><div class="ml">P95(ms)</div></div>
+        <div class="bench-m"><div class="mv" id="bm-p99">—</div><div class="ml">P99(ms)</div></div>
+        <div class="bench-m"><div class="mv" id="bm-min">—</div><div class="ml">最小(ms)</div></div>
+        <div class="bench-m"><div class="mv" id="bm-max">—</div><div class="ml">最大(ms)</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">响应时间分布</div>
+      <div id="benchDistChart" style="padding:4px 0"></div>
+    </div>
   </div>
 </div>
 
@@ -749,6 +821,158 @@ function exportPostman(){
       a.href=u;a.download='mock-service.postman_collection.json';a.click();URL.revokeObjectURL(u);
       toast('Postman Collection 已下载');
     }).catch(function(e){toast('导出失败','err');});
+}
+
+/* ===== 压力测试 ===== */
+var benchState=null,benchTick=null;
+
+function buildBenchReq(ep,bodyObj){
+  var ct=ep.contentType||'application/json';
+  var url=(ep.pathPattern||ep.path||'').replace(/\{([^}]+)\}/g,function(_,k){return bodyObj[k]||'{'+k+'}';});
+  var body;
+  if(ep.method==='GET'){body=undefined;}
+  else if(ct.includes('json')){body=JSON.stringify(bodyObj);}
+  else if(ct.includes('form')||ct.includes('urlencoded')){
+    body=Object.keys(bodyObj).map(function(k){return encodeURIComponent(k)+'='+encodeURIComponent(bodyObj[k]);}).join('&');
+  } else if(ct.includes('xml')){
+    body='<Request>'+Object.keys(bodyObj).map(function(k){return '<'+k+'>'+bodyObj[k]+'</'+k+'>';}).join('')+'</Request>';
+  } else {body=JSON.stringify(bodyObj);}
+  return {url:url,body:body,ct:ct,method:ep.method||'POST'};
+}
+
+function startBench(){
+  var epId=document.getElementById('testEpSelect').value;
+  var ep=testEpMap[epId];
+  if(!ep){toast('请先在「端点选择」中选择一个端点','err');return;}
+  var total=Math.max(1,parseInt(document.getElementById('benchTotal').value)||200);
+  var concurrency=Math.max(1,Math.min(200,parseInt(document.getElementById('benchConcurrency').value)||10));
+  var timeout=Math.max(100,parseInt(document.getElementById('benchTimeout').value)||5000);
+  var bodyObj={};
+  document.querySelectorAll('#testParamGrid .tp-input').forEach(function(inp){
+    if(inp.dataset.param)bodyObj[inp.dataset.param]=inp.value;
+  });
+  var extra=document.getElementById('testExtraJson').value.trim();
+  if(extra){try{Object.assign(bodyObj,JSON.parse(extra));}catch(e){toast('额外 JSON 格式错误','err');return;}}
+  var req=buildBenchReq(ep,bodyObj);
+  benchState={running:true,aborted:false,total:total,done:0,success:0,error:0,times:[],startTime:Date.now()};
+  document.getElementById('benchStartBtn').disabled=true;
+  document.getElementById('benchStopBtn').disabled=false;
+  document.getElementById('benchResultCard').style.display='block';
+  document.getElementById('benchStatusTxt').textContent='运行中… (并发 '+concurrency+'，共 '+total+' 请求)';
+  document.getElementById('benchElapsed').textContent='';
+  document.getElementById('benchDistChart').innerHTML='';
+  clearInterval(benchTick);
+  benchTick=setInterval(updateBenchUI,350);
+  runBenchPool(req,total,concurrency,timeout).then(function(){
+    clearInterval(benchTick);
+    benchState.running=false;
+    updateBenchUI();
+    var elapsed=((Date.now()-benchState.startTime)/1000).toFixed(2);
+    document.getElementById('benchStatusTxt').textContent=benchState.aborted?'已中止 ■':'压测完成 ✔';
+    document.getElementById('benchElapsed').textContent='总耗时 '+elapsed+'s';
+    document.getElementById('benchStartBtn').disabled=false;
+    document.getElementById('benchStopBtn').disabled=true;
+    renderBenchDist(benchState.times);
+  });
+}
+
+function runBenchPool(req,total,concurrency,timeout){
+  return new Promise(function(resolve){
+    var remaining=total,active=0;
+    function dispatch(){
+      while(active<concurrency&&remaining>0&&!benchState.aborted){
+        remaining--;active++;
+        fireBenchReq(req,timeout).then(function(r){
+          active--;
+          benchState.done++;
+          if(r.ok)benchState.success++;else benchState.error++;
+          benchState.times.push(r.ms);
+          if(remaining>0&&!benchState.aborted)dispatch();
+          else if(active===0)resolve();
+        });
+      }
+      if(active===0&&remaining===0)resolve();
+    }
+    dispatch();
+  });
+}
+
+function fireBenchReq(req,timeout){
+  var t0=Date.now();
+  var ctrl=new AbortController();
+  var timer=setTimeout(function(){ctrl.abort();},timeout);
+  var opts={method:req.method==='GET'?'GET':'POST',headers:{'Content-Type':req.ct},signal:ctrl.signal};
+  if(req.body!==undefined)opts.body=req.body;
+  return fetch(req.url,opts)
+    .then(function(r){clearTimeout(timer);return r.text().then(function(){return{ok:r.status<400,ms:Date.now()-t0};});})
+    .catch(function(){clearTimeout(timer);return{ok:false,ms:Date.now()-t0};});
+}
+
+function stopBench(){
+  if(benchState)benchState.aborted=true;
+  document.getElementById('benchStopBtn').disabled=true;
+}
+
+function updateBenchUI(){
+  var s=benchState;if(!s)return;
+  var elapsed=(Date.now()-s.startTime)/1000||0.001;
+  var pd=s.total>0?Math.round(s.done/s.total*100):0;
+  document.getElementById('benchProgBar').style.width=pd+'%';
+  document.getElementById('benchProgTxt').textContent=s.done+' / '+s.total+' ('+pd+'%)';
+  document.getElementById('bm-tput').textContent=(s.done/elapsed).toFixed(1);
+  document.getElementById('bm-ok').textContent=s.success;
+  var errEl=document.getElementById('bm-err');
+  errEl.textContent=s.error>0?s.error+' ('+(s.error/Math.max(s.done,1)*100).toFixed(1)+'%)':s.error;
+  errEl.style.color=s.error>0?'#cf1322':'#2d3748';
+  if(s.times.length){
+    var sorted=s.times.slice().sort(function(a,b){return a-b;});
+    var n=sorted.length;
+    var sum=0;for(var i=0;i<n;i++)sum+=sorted[i];
+    document.getElementById('bm-avg').textContent=Math.round(sum/n);
+    document.getElementById('bm-p50').textContent=sorted[Math.min(n-1,Math.floor(n*.5))];
+    document.getElementById('bm-p95').textContent=sorted[Math.min(n-1,Math.floor(n*.95))];
+    document.getElementById('bm-p99').textContent=sorted[Math.min(n-1,Math.floor(n*.99))];
+    document.getElementById('bm-min').textContent=sorted[0];
+    document.getElementById('bm-max').textContent=sorted[n-1];
+  }
+}
+
+function renderBenchDist(times){
+  if(!times||!times.length){document.getElementById('benchDistChart').innerHTML='<p class="empty">无数据</p>';return;}
+  var buckets=[
+    {l:'≤ 10ms',min:0,max:10,n:0,color:'#48bb78'},
+    {l:'10–50ms',min:10,max:50,n:0,color:'#68d391'},
+    {l:'50–100ms',min:50,max:100,n:0,color:'#f6e05e'},
+    {l:'100–200ms',min:100,max:200,n:0,color:'#ed8936'},
+    {l:'200–500ms',min:200,max:500,n:0,color:'#fc8181'},
+    {l:'500ms–1s',min:500,max:1000,n:0,color:'#f56565'},
+    {l:'> 1s',min:1000,max:Infinity,n:0,color:'#c53030'}
+  ];
+  times.forEach(function(t){
+    for(var i=0;i<buckets.length;i++){if(t>=buckets[i].min&&t<buckets[i].max){buckets[i].n++;break;}}
+  });
+  var maxN=Math.max.apply(null,buckets.map(function(b){return b.n;}))||1;
+  var html=buckets.map(function(b){
+    var bw=Math.round(b.n/maxN*100);
+    var pct=(b.n/times.length*100).toFixed(1);
+    return '<div class="bench-dist-row">'
+      +'<div class="bench-dist-lbl">'+b.l+'</div>'
+      +'<div class="bench-dist-bw"><div class="bench-dist-bf" style="width:'+bw+'%;background:'+b.color+'"></div></div>'
+      +'<div class="bench-dist-n">'+b.n+'</div>'
+      +'<div class="bench-dist-p">'+pct+'%</div>'
+      +'</div>';
+  }).join('');
+  document.getElementById('benchDistChart').innerHTML=html;
+}
+
+function clearBenchResult(){
+  benchState=null;clearInterval(benchTick);
+  document.getElementById('benchResultCard').style.display='none';
+  document.getElementById('benchStartBtn').disabled=false;
+  document.getElementById('benchStopBtn').disabled=true;
+  ['bm-tput','bm-ok','bm-err','bm-avg','bm-p50','bm-p95','bm-p99','bm-min','bm-max'].forEach(function(id){
+    var el=document.getElementById(id);el.textContent='—';el.style.color='';
+  });
 }
 
 /* ===== 工具函数 ===== */
