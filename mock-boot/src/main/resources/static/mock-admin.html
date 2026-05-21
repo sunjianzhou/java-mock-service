@@ -476,7 +476,7 @@ function onEpSelected(){
   } else {
     grid.innerHTML=params.map(function(p){
       return '<div class="param-item"><label>'+esc(p)+' <span style="color:#cf1322">*</span></label>'
-        +'<input id="tp_'+esc(p)+'" placeholder="'+esc(p)+'"></div>';
+        +'<input class="tp-input" data-param="'+esc(p)+'" placeholder="'+esc(p)+'"></div>';
     }).join('');
   }
   clearTestResult();
@@ -487,11 +487,9 @@ function sendTestRequest(){
   if(!ep){toast('请先选择端点','err');return;}
 
   var recordChk=document.getElementById('testRecordChk').checked;
-  var params=(ep.validation&&ep.validation.requiredParams)||[];
   var bodyObj={};
-  params.forEach(function(p){
-    var inp=document.getElementById('tp_'+p);
-    if(inp) bodyObj[p]=inp.value;
+  document.querySelectorAll('#testParamGrid .tp-input').forEach(function(inp){
+    bodyObj[inp.dataset.param]=inp.value;
   });
   // 合并额外 JSON
   var extra=document.getElementById('testExtraJson').value.trim();
@@ -757,8 +755,15 @@ function exportPostman(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 /* ===== 初始化 ===== */
+function initStatus(){
+  ajax('GET','/mock/_admin/status').then(function(s){
+    if(s.recording) setRecState(true);
+    if(s.replaying) setReplayState(true, 0);
+  }).catch(function(){});
+}
 loadEndpoints();
 listRecordings();
+initStatus();
 </script>
 </body>
 </html>

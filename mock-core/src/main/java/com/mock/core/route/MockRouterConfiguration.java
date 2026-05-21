@@ -107,6 +107,7 @@ public class MockRouterConfiguration {
         routes.put("POST /mock/_admin/recordings/load",req -> handler.loadRecordings());
         routes.put("GET /mock/_admin/postman",         req -> handler.exportPostman(holder.get()));
         routes.put("POST /mock/_admin/apply",          req -> handler.apply(req, holder));
+        routes.put("GET /mock/_admin/status",          req -> handler.status());
         routes.put("GET /mock/_admin/stats",           req -> handler.stats());
         routes.put("GET /mock/_admin/requests",        req -> handler.requestLog());
         return routes;

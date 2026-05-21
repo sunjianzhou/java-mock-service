@@ -270,6 +270,14 @@ public class AdminEndpointHandler {
         }
     }
 
+    // ---- 服务状态 ----
+
+    public Mono<ServerResponse> status() {
+        return jsonOk(obj()
+            .put("recording", recordingStore.isRecording())
+            .put("replaying", recordingStore.isReplaying()));
+    }
+
     // ---- 统计 & 请求日志 ----
 
     public Mono<ServerResponse> stats() {

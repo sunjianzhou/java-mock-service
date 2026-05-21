@@ -358,6 +358,7 @@ public class MockRequestHandler {
     public Mono<ServerResponse> reload(ServerRequest request, ReloadableConfigHolder holder) { return adminHandler.reload(request, holder); }
     public Mono<ServerResponse> apply(ServerRequest request, ReloadableConfigHolder holder) { return adminHandler.apply(request, holder); }
     public Mono<ServerResponse> exportPostman(MockConfigProperties config) { return adminHandler.exportPostman(config); }
+    public Mono<ServerResponse> status()     { return adminHandler.status(); }
     public Mono<ServerResponse> stats()      { return adminHandler.stats(); }
     public Mono<ServerResponse> requestLog() { return adminHandler.requestLog(); }
 }
