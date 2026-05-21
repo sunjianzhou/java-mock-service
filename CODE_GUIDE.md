@@ -20,12 +20,11 @@
   - [postman 导出层](#10-postman--导出层)
   - [ws WebSocket 层](#11-ws--websocket-层)
   - [util 工具层](#12-util--工具层)
-- [三、mock-business 业务配置](#三mock-business-业务配置)
-- [四、mock-boot 启动模块](#四mock-boot-启动模块)
-- [五、测试文件](#五测试文件)
-- [六、非代码文件（配置/构建/部署）](#六非代码文件配置构建部署)
-- [七、一次请求的完整代码路径](#七一次请求的完整代码路径)
-- [八、关键接口与扩展点一览](#八关键接口与扩展点一览)
+- [三、mock-boot 启动模块](#三mock-boot-启动模块)
+- [四、测试文件](#四测试文件)
+- [五、非代码文件（配置/构建/部署）](#五非代码文件配置构建部署)
+- [六、一次请求的完整代码路径](#六一次请求的完整代码路径)
+- [七、关键接口与扩展点一览](#七关键接口与扩展点一览)
 
 ---
 
@@ -49,11 +48,6 @@ mock-service/
 │       ├── ws/         ← WebSocket Mock
 │       └── util/       ← 工具类
 │
-├── mock-business/      ← 业务配置，纯 YAML，零 Java 代码
-│   └── src/main/resources/
-│       ├── mock-endpoints.yml   ← 生产端点配置
-│       └── demo.yml             ← 完整示例与注释说明
-│
 ├── mock-boot/          ← Spring Boot 启动壳
 │   └── src/main/
 │       ├── java/.../
@@ -61,6 +55,7 @@ mock-service/
 │       │   └── MockOpenApiConfiguration.java ← Swagger
 │       └── resources/
 │           ├── application.yml       ← 主配置
+│           ├── mock-endpoints.yml    ← 生产端点配置（热加载源）
 │           ├── logback-spring.xml    ← 日志配置
 │           ├── responses/            ← 示例外部响应体文件
 │           └── static/mock-admin.html ← 管理控制台 UI
@@ -168,9 +163,12 @@ get()            // 读取当前配置（无锁，路由匹配时高频调用）
 
 **职责**：监听外部文件系统上的 `mock-endpoints.yml` 变化，触发**自动热加载**。
 
-只有配置了 `mock.watch-path` 且值以 `file:` 开头时才启动，否则跳过。
+路径解析优先级（`resolveWatchPath()` 方法）：
+1. 显式配置 `mock.watch-path`（如 `file:./config/mock-endpoints.yml`）时直接使用
+2. 否则自动探测 `classpath:mock-endpoints.yml` 的文件系统绝对路径（IDE/源码运行时可用）
+3. 文件在 JAR 包内时（`ClassPathResource.getFile()` 抛 `IOException`），热更新不可用，仅打印说明
 
-工作流程：
+工作流程（路径解析成功后）：
 1. 用 Java NIO `WatchService` 注册目标文件所在**目录**的 `ENTRY_MODIFY` 事件
 2. 轮询到事件后，过滤 `OVERFLOW` 事件（防止崩溃），确认是目标文件变化
 3. 500ms 去抖（debounce）防止编辑器多次写入触发重复加载
@@ -242,8 +240,12 @@ isJsonTemplate(template)                     // 内容启发式判断（仅无 c
 | `saveRecordings()` | POST /recordings/save | 异步写文件（boundedElastic） |
 | `loadRecordings()` | POST /recordings/load | 异步读文件 |
 | `reload()` | POST /reload | 重新加载 YAML，synchronized 防止并发 reload 交错 |
+| `apply()` | POST /apply | 接收 YAML 文本直接应用配置（无需文件），用于 UI 在线编辑 |
 | `listRoutes()` | GET /routes | 遍历 endpoints + websockets 生成路由清单 |
 | `exportPostman()` | GET /postman | 委托 PostmanCollectionBuilder |
+| `status()` | GET /status | 返回录制/回放状态（`recording`/`replaying` 布尔值） |
+| `stats()` | GET /stats | 返回请求计数、端点数、最近请求概要统计 |
+| `requestLog()` | GET /requests | 返回最近 N 条 `RequestLogEntry` 详情（含参数快照和响应预览） |
 
 辅助方法：
 - `obj()` — 创建空 `ObjectNode`，替代字符串拼接构建 JSON
@@ -383,7 +385,7 @@ Mono<Map<String, String>> extractParams(ServerWebExchange)  // 异步提取参�
 
 #### `InMemoryRecordingStore.java`
 
-**职责**：基于内存（`LinkedList`）的录制存储，带**互斥状态机**和**容量上限**。
+**职责**：基于内存（`ArrayDeque`）的录制存储，带**互斥状态机**和**容量上限**。
 
 **状态机**（`AtomicReference<Mode>`）：
 ```
@@ -396,7 +398,7 @@ RECORDING 和 REPLAYING 不可同时激活
 - `recordings` 列表所有读写操作 `synchronized(recordings)`
 - `mode` 状态用 `AtomicReference`（无锁 CAS）
 
-**容量管理**：上限 10,000 条，超出后淘汰最早的记录（`LinkedList.remove(0)` O(1)）
+**容量管理**：上限 10,000 条，超出后淘汰最早的记录（`ArrayDeque.pollFirst()` O(1)，比 `LinkedList.remove(0)` 更好的缓存局部性）
 
 **文件持久化**：
 - `saveToFile()` → `recordings/recordings.json`（先快照再写盘，释放锁后再 I/O）
@@ -439,10 +441,11 @@ RECORDING 和 REPLAYING 不可同时激活
 2. 在 adminRoutes Map 中 O(1) 查找 → 命中则交给管理处理器
 3. 遍历 holder.get().getEndpoints() 做 PathPattern 匹配
 4. 找到匹配的端点 → MockRequestHandler.handle()
-5. 无匹配 → 404
+5. 无匹配 → Mono.empty()，让 Spring 继续尝试下一个 HandlerMapping
+   （ResourceHandlerMapping 负责处理 /mock-admin.html 等静态资源）
 ```
 
-`buildAdminRoutes()` 方法：将 11 个管理端点定义为 `Map<String, HandlerFunction>` — 新增管理端点只需在此 Map 加一行。
+`buildAdminRoutes()` 方法：将 15 个管理端点定义为 `Map<String, HandlerFunction>` — 新增管理端点只需在此 Map 加一行。
 
 `matches()` 方法：用 `PathPatternParser` + `patternCache`（ConcurrentHashMap）做路径匹配，同时提取路径变量并存入 `request.attributes`。
 
@@ -524,6 +527,26 @@ String execute(String script, Map<String, String> params)
 - `@Autowired(required = false)` 注入 `MeterRegistry`，测试环境回退到 `Metrics.globalRegistry`
 - Counter / Timer 按 `method|endpointId` / `method|endpointId|status` 缓存，避免每次请求重复 `register`
 - `ensureGauges()` 用双重检查锁（DCL）确保 Gauge 只注册一次
+
+---
+
+#### `RequestLogEntry.java`
+
+**职责**：单次请求的**轻量日志记录**，供管理控制台的"统计信息"和"最近请求"两个面板使用。
+
+| 字段 | 说明 |
+|------|------|
+| `id` | UUID 前 8 位，便于展示 |
+| `timestamp` | ISO-8601 时间戳（`Instant.now()` 自动生成） |
+| `method` | HTTP 方法 |
+| `path` | 请求路径 |
+| `endpointId` | 命中的端点 id |
+| `params` | 解析出的请求参数 Map |
+| `status` | 响应状态码 |
+| `durationMs` | 请求耗时（毫秒） |
+| `responsePreview` | 响应体前 200 字符快照 |
+
+由 `MockMetrics` 持有一个 `Deque<RequestLogEntry>`，`MockRequestHandler` 每次处理完请求后追加一条。`AdminEndpointHandler.requestLog()` 返回最近 N 条，`AdminEndpointHandler.stats()` 汇总统计数据。
 
 ---
 
@@ -634,44 +657,7 @@ welcome（onConnect 消息）
 
 ---
 
-## 三、mock-business 业务配置
-
-> 纯 YAML，零 Java 代码。修改此目录下的文件配合热加载即可完成全部 Mock 配置。
-
----
-
-#### `mock-endpoints.yml`
-
-**职责**：**生产端点配置**，当前系统实际使用的所有 Mock 端点定义。
-
-包含的端点（按业务分组）：
-- 证通系列（form-encoded）：`zt-id-card`、`zt-id-image`、`zt-green-card`、`zt-green-card-image`
-- 金联汇通系列（JSON）：`eid-id-card`（pathPattern）、`eid-id-image`、`eid-green-card`、`eid-green-card-image`
-- 北京数字认证（JSON）：`bjca-org`
-- 组代中心（XML/SOAP）：`nacao-org`、`nacao-wsdl`
-
----
-
-#### `demo.yml`
-
-**职责**：**配置示例与完整注释**，展示所有配置能力，供团队参考和新人学习。
-
-包含 15 个带详细中文注释的示例，覆盖：
-- Form / JSON / XML / GET 四种协议
-- 精确路径 / pathPattern 两种路由
-- 参数校验（必填 + 正则）
-- 模板回显（`{{param.xxx}}` + `{{now}}` / `{{uuid}}` / `{{seq}}`）
-- 条件响应（conditionalResponse）
-- 延迟模拟（固定 / 随机范围）
-- 外部文件响应（classpath: / file: 两种前缀）
-- JS 脚本响应（时间戳、MD5 签名）
-- WebSocket Mock（echo、心跳、模式匹配）
-
-文件末尾附有**完整配置速查**（所有字段说明）和**常见问题解答**。
-
----
-
-## 四、mock-boot 启动模块
+## 三、mock-boot 启动模块
 
 > 薄壳模块，只做启动和 Swagger 配置，不含业务逻辑。
 
@@ -707,7 +693,7 @@ welcome（onConnect 消息）
 
 关键配置项：
 ```yaml
-spring.config.import: classpath:mock-endpoints.yml   # 引入业务配置
+spring.config.import: classpath:mock-endpoints.yml   # 引入端点配置（与 application.yml 同目录）
 server.port: 8080
 server.shutdown: graceful                             # 优雅停机，等待处理中的请求完成
 spring.codec.max-in-memory-size: 1MB                 # 请求体最大缓冲（超大 XML/JSON 时调大）
@@ -733,15 +719,37 @@ management.endpoints.web.exposure.include: health,info,metrics,prometheus  # Act
 
 ---
 
+#### `mock-endpoints.yml`
+
+**职责**：**生产端点配置**，当前系统实际使用的所有 Mock 端点定义。位于 `mock-boot/src/main/resources/`，与 `application.yml` 同目录，通过 `spring.config.import` 加载。
+
+包含的端点（按业务分组）：
+- 证通系列（form-encoded）：`zt-id-card`、`zt-id-image`、`zt-green-card`、`zt-green-card-image`
+- 金联汇通系列（JSON）：`eid-id-card`（pathPattern）、`eid-id-image`、`eid-green-card`、`eid-green-card-image`
+- 北京数字认证（JSON）：`bjca-org`
+- 组代中心（XML/SOAP）：`nacao-org`、`nacao-wsdl`
+
+热更新方式：IDE/源码启动时 `ConfigFileWatcher` 自动检测到此文件并开启文件监听；JAR 部署时需配置 `--mock.watch-path=file:/path/to/mock-endpoints.yml` 指向外部文件。
+
+---
+
 #### `static/mock-admin.html`
 
-**职责**：纯 HTML + 原生 JavaScript 实现的**可视化管理控制台**（无外部依赖）。
+**访问地址**：`http://localhost:8080/mock-admin.html`（服务启动后直接打开）
 
-功能面板：
-- **Endpoints 面板**：调用 `/mock/_admin/routes`，表格展示所有已注册的 HTTP 和 WebSocket 端点
-- **录制面板**：录制开始/停止、查看录制记录列表、保存/加载/清空操作
-- **回放面板**：回放开始/停止
-- **配置面板**：触发热加载（POST `/mock/_admin/reload`）
+**职责**：纯 HTML + 原生 JavaScript 实现的**可视化管理控制台**（无外部依赖，单文件），托管于 Spring Boot 静态资源目录，由 `ResourceHandlerMapping` 直接提供服务。
+
+7 个功能标签页：
+
+| 标签页 | 调用端点 | 说明 |
+|--------|----------|------|
+| **端点列表** | GET `/mock/_admin/routes` | 表格展示所有已注册的 HTTP 和 WebSocket 端点（方法、路径、描述、状态码） |
+| **在线测试** | 各 Mock 端点 | 从端点列表选择端点，自动生成参数输入表单，发送测试请求并展示响应 |
+| **统计信息** | GET `/mock/_admin/stats` | 显示请求总数、端点数、录制/回放状态；GET `/mock/_admin/requests` 展示最近请求日志（含参数快照和响应预览） |
+| **录制回放** | POST `/record/start` 等 | 录制开始/停止；回放开始/停止；查看录制记录列表；保存/加载/清空录制文件 |
+| **配置管理** | POST `/mock/_admin/reload` | 触发热加载（重读 YAML 文件）；POST `/mock/_admin/apply` 支持在线粘贴 YAML 文本直接应用，无需修改文件 |
+| **Postman 导出** | GET `/mock/_admin/postman` | 将当前端点配置导出为 Postman Collection v2.1 JSON，可直接导入 Postman |
+| **系统状态** | GET `/mock/_admin/status` | 显示服务当前录制/回放状态；集成 Swagger 和 Actuator 健康检查入口链接 |
 
 ---
 
@@ -751,9 +759,9 @@ management.endpoints.web.exposure.include: health,info,metrics,prometheus  # Act
 
 ---
 
-## 五、测试文件
+## 四、测试文件
 
-> 位于 `mock-core/src/test/`，105 个测试，0 失败。
+> 位于 `mock-core/src/test/`，110 个测试，0 失败。
 
 ---
 
@@ -765,7 +773,7 @@ management.endpoints.web.exposure.include: health,info,metrics,prometheus  # Act
 | `JsonAdapterTest` | 8 | JSON 参数提取（顶层字段、嵌套 dot-notation、数组、无效 JSON、空 body） |
 | `XmlAdapterTest` | 10 | XML/SOAP 参数提取（简单 XML、SOAP Envelope、嵌套、注释节点、空 body） |
 | `MockWebSocketHandlerTest` | 5 | WS 模板引擎（sessionId 替换、message 替换、多占位符、null 输入、无占位符） |
-| `MockRouterConfigurationTest` | 33 | 端到端集成测试（精确路径 200、pathPattern 匹配、404、参数校验 400、条件响应、模板回显、响应延迟、管理端点、录制/回放、WS 注册、WSDL） |
+| `MockRouterConfigurationTest` | 38 | 端到端集成测试（精确路径 200、pathPattern 匹配、404、参数校验 400、条件响应、模板回显、响应延迟、管理端点 stats/requests/status/apply、录制/回放、WS 注册、WSDL） |
 
 **测试配置**：
 - `mock-core/src/test/resources/application.yml` — 测试专用配置（随机端口）
@@ -774,7 +782,7 @@ management.endpoints.web.exposure.include: health,info,metrics,prometheus  # Act
 
 ---
 
-## 六、非代码文件（配置/构建/部署）
+## 五、非代码文件（配置/构建/部署）
 
 ---
 
@@ -783,7 +791,7 @@ management.endpoints.web.exposure.include: health,info,metrics,prometheus  # Act
 **职责**：多模块 Maven 父 POM，统一管理。
 
 - 继承 `spring-boot-starter-parent:2.7.18`
-- 声明 3 个子模块：`mock-core`、`mock-business`、`mock-boot`
+- 声明 2 个子模块：`mock-core`、`mock-boot`
 - 锁定 Java 8 编译（`maven.compiler.source/target = 1.8`）
 - UTF-8 编码
 
@@ -809,7 +817,7 @@ ENTRYPOINT：sh -c "java $JAVA_OPTS -jar /app/app.jar"（支持通过环境变�
 
 **职责**：本地开发和简单部署的容器编排配置。
 
-- 挂载 `mock-business/src/main/resources/mock-endpoints.yml` 到容器 `/config/`（配合热加载）
+- 挂载外部 `mock-endpoints.yml` 到容器 `/config/`（配合热加载，需指定 `--mock.watch-path=file:/config/mock-endpoints.yml`）
 - 默认 JVM 参数：`-Xms128m -Xmx256m`
 - `restart: unless-stopped`（意外退出自动重启）
 - 健康检查与 Dockerfile 保持一致
@@ -843,7 +851,7 @@ java -Xms128m -Xmx256m -jar mock-boot/target/mock-boot-1.0.0.jar "$@"
 
 ---
 
-## 七、一次请求的完整代码路径
+## 六、一次请求的完整代码路径
 
 以 `POST /mock/ias/zt/id-card`（证通身份证认证）为例，追踪经过的每个类：
 
@@ -896,7 +904,7 @@ HTTP 响应返回
 
 ---
 
-## 八、关键接口与扩展点一览
+## 七、关键接口与扩展点一览
 
 | 接口 | 位置 | 扩展方式 | 用途 |
 |------|------|----------|------|
@@ -908,4 +916,4 @@ HTTP 响应返回
 
 ---
 
-*文档生成时间：2026-05-20 | 对应代码版本：`286ac74`（refactor 提交）*
+*文档更新时间：2026-05-21 | 项目结构：2 模块（mock-core + mock-boot）| 测试：110 个，0 失败*
