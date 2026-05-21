@@ -68,7 +68,6 @@ public class MockRouterConfiguration {
     public RouterFunction<ServerResponse> mockRoutes(MockConfigProperties config,
                                                       MockRequestHandler handler,
                                                       ReloadableConfigHolder holder) {
-        config.validate();
         holder.set(config);
         logEndpoints(config);
 

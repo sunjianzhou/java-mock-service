@@ -38,9 +38,11 @@ public class AdminEndpointHandler {
     private static final Logger log = LoggerFactory.getLogger(AdminEndpointHandler.class);
     private static final com.fasterxml.jackson.databind.ObjectMapper OBJECT_MAPPER =
         new com.fasterxml.jackson.databind.ObjectMapper();
-    // Fix-2: SafeConstructor 禁止 !! 标签实例化任意 Java 类，防止 YAML 注入
-    private static final org.yaml.snakeyaml.Yaml YAML =
-        new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor());
+    // SafeConstructor 禁止 !! 标签实例化任意 Java 类，防止 YAML 注入。
+    // 注意：SnakeYAML Yaml 实例非线程安全，不得设为 static 字段，须在调用处按需创建。
+    private static org.yaml.snakeyaml.Yaml newYaml() {
+        return new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor());
+    }
     // Fix-4: 无状态工厂，提取为静态常量避免每次响应重复创建
     private static final DefaultDataBufferFactory DATA_BUFFER_FACTORY = new DefaultDataBufferFactory();
 
@@ -188,10 +190,8 @@ public class AdminEndpointHandler {
     public Mono<ServerResponse> apply(ServerRequest request, ReloadableConfigHolder holder) {
         return request.bodyToMono(String.class)
             .flatMap(yaml -> Mono.fromCallable(() -> {
-                org.yaml.snakeyaml.Yaml snakeYaml =
-                    new org.yaml.snakeyaml.Yaml(new org.yaml.snakeyaml.constructor.SafeConstructor());
                 java.util.Map<String, Object> root =
-                    (java.util.Map<String, Object>) snakeYaml.load(yaml);
+                    (java.util.Map<String, Object>) newYaml().load(yaml);
                 com.mock.core.config.MockConfigProperties newConfig =
                     com.mock.core.config.YamlConfigParser.parse(root);
                 com.mock.core.config.MockConfigProperties old;
@@ -264,7 +264,7 @@ public class AdminEndpointHandler {
             }
         }
         try (InputStreamReader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-            return (Map<String, Object>) YAML.load(reader);
+            return (Map<String, Object>) newYaml().load(reader);
         } catch (Exception e) {
             throw new RuntimeException("Failed to load config YAML", e);
         }

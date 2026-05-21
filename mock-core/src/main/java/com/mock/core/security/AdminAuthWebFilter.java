@@ -4,12 +4,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
+
+import java.nio.charset.StandardCharsets;
 
 /**
  * Admin 端点鉴权过滤器：对 /mock/_admin/** 路径校验 X-API-Key。
@@ -45,6 +50,10 @@ public class AdminAuthWebFilter implements WebFilter {
         }
         log.warn("Admin endpoint access denied (bad or missing X-API-Key): {}", path);
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-        return exchange.getResponse().setComplete();
+        exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        byte[] body = "{\"status\":\"error\",\"message\":\"Unauthorized: invalid or missing X-API-Key\"}"
+            .getBytes(StandardCharsets.UTF_8);
+        DataBuffer buf = new DefaultDataBufferFactory().wrap(body);
+        return exchange.getResponse().writeWith(Mono.just(buf));
     }
 }

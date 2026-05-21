@@ -33,7 +33,8 @@ public class AuditWebFilter implements WebFilter {
 
     private void log(String method, String path, ServerWebExchange exchange, long start) {
         long duration = System.currentTimeMillis() - start;
-        int status = exchange.getResponse().getRawStatusCode();
+        Integer rawStatus = exchange.getResponse().getRawStatusCode();
+        int status = rawStatus != null ? rawStatus : 0;
         String query = exchange.getRequest().getURI().getRawQuery();
 
         // Fix-3: query 参数值可能含敏感数据（身份证号、生物特征等），仅记录参数名
